@@ -1,0 +1,13 @@
+paths:
+  raw_data: "data/raw/"
+  processed_data: "data/processed/"
+  models: "models/"
+  artifacts: "artifacts/"
+
+mlflow:
+  experiment_name: "email-classifier-baseline"
+  tracking_uri: "sqlite:///mlflow.db"
+
+app:
+  host: "0.0.0.0"
+  port: 8000

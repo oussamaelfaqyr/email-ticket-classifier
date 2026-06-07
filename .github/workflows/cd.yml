@@ -1,0 +1,23 @@
+name: CD
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Build Docker Image
+        run: |
+          docker build -t email-ticket-classifier:latest -f docker/Dockerfile .
+          
+      - name: Push to Registry & Deploy
+        run: |
+          echo "Placeholder: docker push registry.com/email-ticket-classifier:latest"
+          echo "Placeholder: deploy to Cloud Run or ECS"

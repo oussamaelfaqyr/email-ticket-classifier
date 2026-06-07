@@ -1,0 +1,44 @@
+stages:
+  ingest:
+    cmd: python -m src.data.ingest
+    outs:
+      - data/raw/data.csv
+
+  preprocess:
+    cmd: python -m src.data.preprocess
+    deps:
+      - data/raw/data.csv
+      - src/data/preprocess.py
+    params:
+      - base.random_state
+      - data.test_size
+    outs:
+      - data/processed/train.csv
+      - data/processed/test.csv
+
+  build_features:
+    cmd: python -m src.features.build_features
+    deps:
+      - data/processed/train.csv
+      - data/processed/test.csv
+      - src/features/build_features.py
+    params:
+      - features.max_features
+      - features.ngram_range
+    outs:
+      - data/processed/vectorizer.pkl
+      - data/processed/train_features.pkl
+      - data/processed/test_features.pkl
+
+  train_baseline:
+    cmd: python -m src.training.baseline.train
+    deps:
+      - data/processed/train_features.pkl
+      - data/processed/test_features.pkl
+      - src/training/baseline/train.py
+    params:
+      - base.random_state
+      - training.baseline.C
+      - training.baseline.max_iter
+    outs:
+      - models/baseline.pkl

@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Environment
+.env
+
+# DVC and MLflow
+.dvc/
+mlruns/
+mlflow.db
+
+# Test/Lint cache
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# IDEs
+.vscode/
+.idea/

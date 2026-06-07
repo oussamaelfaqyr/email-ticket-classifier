@@ -1,0 +1,27 @@
+base:
+  random_state: 42
+  log_level: INFO
+
+data:
+  test_size: 0.2
+  val_size: 0.1
+  synthetic_samples_per_class: 500
+
+features:
+  max_features: 5000
+  ngram_range: [1, 2]
+
+training:
+  baseline:
+    C: 1.0
+    max_iter: 1000
+  bert:
+    model_name: "distilbert-base-uncased"
+    max_length: 128
+    learning_rate: 2.0e-5
+    batch_size: 16
+    epochs: 3
+
+serving:
+  confidence_threshold_high: 0.85
+  confidence_threshold_medium: 0.60
