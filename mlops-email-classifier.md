@@ -1,6 +1,6 @@
 # Email Ticket Classifier — MLOps Project Documentation
 
-> A two-stage NLP classification system trained on synthetic data and fine-tuned on real-world email corpora, deployed as a production MLOps pipeline with automated retraining and live email integration.
+> A two-stage NLP classification system trained on a Kaggle database and fine-tuned on real-world email corpora, deployed as a production MLOps pipeline with automated retraining and live email integration.
 
 | Field | Value |
 |---|---|
@@ -14,12 +14,12 @@
 
 ## 01 — Project Overview
 
-The system automatically classifies inbound support emails into structured categories, routes them to the appropriate team or ticketing system, and continuously improves through human feedback. It follows the same two-stage training strategy used in production AI systems: first learning on clean synthetic data, then adapting to messy real-world language.
+The system automatically classifies inbound support emails into structured categories, routes them to the appropriate team or ticketing system, and continuously improves through human feedback. It follows the same two-stage training strategy used in production AI systems: first learning on a clean Kaggle database, then adapting to messy real-world language.
 
 **Key capabilities**
 
 - Automated inbox triage — no manual sorting required
-- Two-stage NLP training on synthetic then real-world data
+- Two-stage NLP training on a Kaggle database then real-world data
 - Continuous retraining triggered by drift detection
 - Quality gates enforced in CI/CD — no model ships below F1 0.85
 - Drift monitoring with Evidently AI in production
@@ -31,11 +31,11 @@ The system automatically classifies inbound support emails into structured categ
 
 ## 02 — Training Pipeline
 
-Training is split into two sequential stages. The first stage builds a reliable baseline using clean, controlled synthetic data. The second stage adapts that baseline to real-world noise, abbreviations, and domain-specific language using the Enron corpus and live support ticket archives.
+Training is split into two sequential stages. The first stage builds a reliable baseline using a clean, controlled Kaggle database. The second stage adapts that baseline to real-world noise, abbreviations, and domain-specific language using the Enron corpus and live support ticket archives.
 
-### Stage 01 — Synthetic data training
+### Stage 01 — Kaggle database training
 
-- LLM generates labeled email samples per category
+- Kaggle dataset supplies labeled email samples per category
 - Balanced class distribution enforced across all labels
 - TF-IDF + Logistic Regression trained as fast baseline model
 - Every run logged to MLflow with full parameter set
@@ -53,7 +53,7 @@ Training is split into two sequential stages. The first stage builds a reliable 
 
 ```
 Raw emails  →  Preprocess  →  Features  →  Train  →  Evaluate  →  Registry
-(synthetic      (clean +       (TF-IDF /    (stage     (F1 quality   (MLflow
+(Kaggle         (clean +       (TF-IDF /    (stage     (F1 quality   (MLflow
  + Enron)        tokenize)      embeddings)  1 → 2)     gate)          promote)
 ```
 
@@ -165,12 +165,12 @@ def route(label: str, confidence: float, email: dict):
 email-ticket-classifier/
 ├── .dvc/                       # DVC config and remote settings
 ├── data/                       # versioned by DVC, never committed raw
-│   ├── raw/synthetic/          # LLM-generated labeled emails
+│   ├── raw/kaggle/             # Kaggle database labeled emails
 │   ├── raw/enron/              # Enron email corpus
 │   └── processed/              # cleaned, split, tokenized
 ├── src/
 │   ├── data/
-│   │   ├── generate_synthetic.py   # LLM email generator
+│   │   ├── ingest_kaggle.py        # Kaggle dataset downloader
 │   │   ├── ingest_enron.py         # download + parse Enron
 │   │   └── preprocess.py           # clean, tokenize, split
 │   ├── features/
