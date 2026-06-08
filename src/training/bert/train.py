@@ -93,7 +93,12 @@ def train_bert(train_path: str, test_path: str, model_out: str):
         tokenizer.save_pretrained(model_out)
         mlflow.transformers.log_model(
             transformers_model={"model": model, "tokenizer": tokenizer},
-            artifact_path="model"
+            artifact_path="model",
+            pip_requirements=[
+                f"transformers=={__import__('transformers').__version__}",
+                f"torch=={__import__('torch').__version__}",
+                f"accelerate=={__import__('accelerate').__version__}",
+            ]
         )
         print(f"DistilBERT trained and saved to {model_out}")
 
