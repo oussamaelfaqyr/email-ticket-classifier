@@ -181,8 +181,132 @@ def save_feedback(ticket: Ticket, human_label: str, response_email: str = ""):
         db.close()
 
 
+# ── Training Status helpers ────────────────────────────────────────────────────
+@st.cache_data(ttl=30)   # refresh every 30 s automatically
+def get_latest_workflow_run():
+    """Query GitHub Actions API for the latest CLP workflow run."""
+    token = st.secrets.get("GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
+    repo  = st.secrets.get("GITHUB_REPO")  or os.environ.get("GITHUB_REPO",  "OWNER/REPO")
+    if not token or repo == "OWNER/REPO":
+        return None
+    try:
+        url = f"https://api.github.com/repos/{repo}/actions/workflows/retrain.yml/runs?per_page=1"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github.v3+json"}
+        r = requests.get(url, headers=headers, timeout=8)
+        if r.status_code == 200:
+            runs = r.json().get("workflow_runs", [])
+            return runs[0] if runs else None
+    except Exception:
+        pass
+    return None
+
+@st.cache_data(ttl=300)  # refresh every 5 min
+def get_current_model_version():
+    """Fetch model_pointers.json from HF Hub to get the active model version."""
+    hf_repo_id = st.secrets.get("HF_REPO_ID") or os.environ.get("HF_REPO_ID", "")
+    if not hf_repo_id:
+        return None, None
+    try:
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(repo_id=hf_repo_id, filename="model_pointers.json")
+        with open(path) as f:
+            p = json.load(f)
+        return p.get("active", "main"), p.get("stable", "main")
+    except Exception:
+        return None, None
+
+def count_feedback_files():
+    """Count total feedback events committed to the repo."""
+    return len([f for f in glob.glob("data/feedback/**/*.json", recursive=True)
+                if not f.endswith(".gitkeep")])
+
+try:
+    import glob as _glob_mod
+    import glob
+except ImportError:
+    pass
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# UI
+# SIDEBAR — CLP Status Panel
+# ═══════════════════════════════════════════════════════════════════════════════
+with st.sidebar:
+    st.header("🤖 CLP Status")
+
+    # — Model version —
+    active_ver, stable_ver = get_current_model_version()
+    if active_ver:
+        st.markdown(f"**Active model:** `{active_ver}`")
+        st.markdown(f"**Stable model:** `{stable_ver}`")
+    else:
+        st.markdown("**Model source:** Baseline (sklearn)")
+        st.caption("Set HF_REPO_ID secret to enable HF tracking.")
+
+    st.divider()
+
+    # — GitHub Actions latest run —
+    run = get_latest_workflow_run()
+    if run:
+        status     = run.get("status", "unknown")      # queued / in_progress / completed
+        conclusion = run.get("conclusion") or ""        # success / failure / cancelled / None
+        run_number = run.get("run_number", "?")
+        updated_at = run.get("updated_at", "")[:16].replace("T", " ")
+        html_url   = run.get("html_url", "#")
+
+        if status == "in_progress" or status == "queued":
+            st.markdown("### 🟡 Training in progress…")
+            st.caption(f"Run #{run_number} · started {updated_at} UTC")
+            st.info("A new model is being trained. The page will refresh automatically.", icon="⏳")
+        elif conclusion == "success":
+            st.markdown("### ✅ Last run: Success")
+            st.caption(f"Run #{run_number} · finished {updated_at} UTC")
+            st.success("Model trained and deployed to Hugging Face Hub!", icon="🚀")
+        elif conclusion == "failure":
+            st.markdown("### ❌ Last run: Failed")
+            st.caption(f"Run #{run_number} · {updated_at} UTC")
+            st.error("Pipeline failed — check GitHub Actions for details.", icon="🚨")
+        elif conclusion == "skipped" or (conclusion == "" and status == "completed"):
+            st.markdown("### ⏭️ Last run: Skipped")
+            st.caption(f"Run #{run_number} · {updated_at} UTC")
+            st.warning("Not enough feedback yet to trigger retraining.", icon="📭")
+        else:
+            st.markdown(f"### ℹ️ Last run: `{status}`")
+            st.caption(f"Run #{run_number} · {updated_at} UTC")
+
+        st.markdown(f"[View in GitHub Actions ↗]({html_url})")
+    else:
+        st.markdown("### ⚪ No runs yet")
+        st.caption("Submit feedback to trigger the first training run.")
+
+    st.divider()
+
+    # — Feedback stats —
+    try:
+        import glob
+        n_feedback = len([f for f in glob.glob("data/feedback/**/*.json", recursive=True)
+                          if not f.endswith(".gitkeep")])
+        st.metric("Feedback events", n_feedback, help="Immutable events stored in data/feedback/")
+        st.caption(f"Need 50 to retrain (or trigger manually with min_batch_size=1)")
+    except Exception:
+        pass
+
+    st.divider()
+
+    # — Manual refresh button —
+    if st.button("🔄 Refresh model & status", use_container_width=True):
+        get_latest_workflow_run.clear()
+        get_current_model_version.clear()
+        load_classifier.clear()
+        st.rerun()
+
+    # — Auto-refresh while training —
+    if run and (run.get("status") in ("in_progress", "queued")):
+        st.caption("Auto-refreshing every 30 s while training…")
+        time.sleep(30)
+        get_latest_workflow_run.clear()
+        st.rerun()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN UI
 # ═══════════════════════════════════════════════════════════════════════════════
 st.title(":material/support_agent: Email Ticket Classifier Dashboard")
 

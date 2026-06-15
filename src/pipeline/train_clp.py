@@ -40,22 +40,32 @@ def get_processed_files():
     return processed
 
 def run_pipeline():
-    print("=== Continuous Learning Pipeline Started ===")
+    min_batch = int(os.environ.get("MIN_BATCH_SIZE", "50"))
+    print(f"=== Continuous Learning Pipeline Started (MIN_BATCH_SIZE={min_batch}) ===")
     
     # 1. Find all feedback files
     all_files = set(glob.glob("data/feedback/**/*.json", recursive=True))
     
-    # Exclude quarantine and state files if any
-    all_files = {f for f in all_files if "quarantine" not in f and not f.endswith("_state.json")}
+    # Exclude quarantine, gitkeep and state files
+    all_files = {
+        f for f in all_files
+        if "quarantine" not in f
+        and not f.endswith("_state.json")
+        and not f.endswith(".gitkeep")
+    }
     
     processed_files = get_processed_files()
     unprocessed_files = list(all_files - processed_files)
     
-    print(f"Total unprocessed events found: {len(unprocessed_files)}")
+    print(f"[CLP] Feedback files found  : {len(all_files)}")
+    print(f"[CLP] Already processed     : {len(processed_files)}")
+    print(f"[CLP] New unprocessed events: {len(unprocessed_files)}")
+    print(f"[CLP] Batch gate            : {min_batch}")
     
     # 2. Batch Check
-    if len(unprocessed_files) < 50:
-        print("Less than 50 new samples. Skipping training.")
+    if len(unprocessed_files) < min_batch:
+        print(f"[CLP] SKIP — only {len(unprocessed_files)} new sample(s), need {min_batch}. Exiting cleanly.")
+        print(f"[CLP] TIP: Trigger workflow manually with min_batch_size=1 to force a test run.")
         sys.exit(0)
         
     print("Batch size met. Processing events...")
