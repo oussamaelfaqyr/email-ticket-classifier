@@ -125,9 +125,25 @@ def run_pipeline():
     train_dataset = Dataset.from_pandas(train_df)
     test_dataset = Dataset.from_pandas(test_df)
     
-    # We will start from standard distilbert to train
-    model_name = "distilbert-base-uncased"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    # Continuous Learning: Start from the current best model, not from scratch
+    hf_repo_id = os.environ.get("HF_REPO_ID", "")
+    
+    if hf_repo_id:
+        print(f"Loading current active model from Hugging Face: {hf_repo_id}")
+        model_name = hf_repo_id
+    elif os.path.exists("models/bert_model"):
+        print("Loading current local model: models/bert_model")
+        model_name = "models/bert_model"
+    else:
+        print("No existing model found. Starting from scratch with distilbert-base-uncased")
+        model_name = "distilbert-base-uncased"
+        
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+    except Exception as e:
+        print(f"Failed to load tokenizer from {model_name}. Falling back to base model.")
+        model_name = "distilbert-base-uncased"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
     
     def tokenize_function(examples):
         return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=128)
@@ -141,7 +157,11 @@ def run_pipeline():
     test_dataset.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
     
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_name, num_labels=len(unique_labels), id2label=id2label, label2id=label2id
+        model_name, 
+        num_labels=len(unique_labels), 
+        id2label=id2label, 
+        label2id=label2id,
+        ignore_mismatched_sizes=True
     )
     
     def compute_metrics(pred):
