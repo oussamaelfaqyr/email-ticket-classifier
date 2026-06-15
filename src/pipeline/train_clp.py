@@ -177,8 +177,9 @@ def run_pipeline():
     f1_macro = eval_results.get("eval_f1_macro", 0.0)
     print(f"Evaluation F1-Macro: {f1_macro:.4f}")
     
-    if f1_macro < 0.85:
-        print("F1-Macro is below 0.85. Failing pipeline to prevent bad model deployment.")
+    min_f1 = float(os.environ.get("MIN_F1_SCORE", "0.85"))
+    if f1_macro < min_f1:
+        print(f"F1-Macro is below {min_f1}. Failing pipeline to prevent bad model deployment.")
         sys.exit(1)
         
     print("Model passed evaluation gate!")

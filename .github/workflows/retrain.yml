@@ -9,6 +9,10 @@ on:
         description: "Minimum feedback samples required to trigger retraining (default: 50)"
         required: false
         default: "50"
+      min_f1_score:
+        description: "Minimum F1 score required to deploy the model (default: 0.85)"
+        required: false
+        default: "0.85"
 
 jobs:
   retrain:
@@ -35,6 +39,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_REPO_ID: ${{ secrets.HF_REPO_ID }}
           MIN_BATCH_SIZE: ${{ github.event.inputs.min_batch_size || github.event.client_payload.min_batch_size || '50' }}
+          MIN_F1_SCORE: ${{ github.event.inputs.min_f1_score || '0.85' }}
         run: |
           python src/pipeline/train_clp.py
 
