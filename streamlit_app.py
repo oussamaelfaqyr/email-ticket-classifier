@@ -1,157 +1,159 @@
 import streamlit as st
 import time
 import os
-import pandas as pd
 import sys
+import uuid
+import json
+import base64
+import requests
+from datetime import datetime
 
-# Ensure repo root is importable when run from repo root by Streamlit Cloud
+# Ensure repo root is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.serving.app import classify_email, get_tickets, resolve_ticket, load_model
-from src.serving.app import loader  # ModelLoader instance for class names
-from src.serving.schemas import EmailRequest, ResolveRequest
-from src.db.database import SessionLocal
+from src.serving.model_loader import get_inference_pipeline
 
-FEEDBACK_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "data", "human_feedback.csv"
-)
-
-@st.cache_resource
-def init_system():
-    load_model()
-    return True
-
-init_system()
-
-def get_db_session():
-    db = SessionLocal()
-    try:
-        return db
-    except Exception:
-        db.close()
-        raise
-
-def save_feedback(ticket, human_label: str):
-    """Append a corrected label row to data/human_feedback.csv for retraining."""
-    row = pd.DataFrame([{
-        "subject": ticket.subject,
-        "body": ticket.body,
-        "predicted_label": ticket.predicted_label,
-        "human_label": human_label,
-        "confidence": ticket.confidence,
-        "timestamp": pd.Timestamp.now(),
-    }])
-    if os.path.exists(FEEDBACK_PATH):
-        row.to_csv(FEEDBACK_PATH, mode="a", header=False, index=False)
-    else:
-        os.makedirs(os.path.dirname(FEEDBACK_PATH), exist_ok=True)
-        row.to_csv(FEEDBACK_PATH, mode="w", header=True, index=False)
-
-# ── Page layout ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Ticket Classifier",
+    page_title="Ticket Classifier CLP",
     page_icon=":material/support_agent:",
     layout="wide",
 )
-st.title(":material/support_agent: Email Ticket Classifier Dashboard")
 
-tab1, tab2, tab3 = st.tabs([
-    ":material/science: Test Classifier",
-    ":material/pending_actions: Human Review Queue",
-    ":material/mark_email_read: Processed & Sent",
-])
+@st.cache_resource
+def load_system():
+    return get_inference_pipeline()
 
-# ── Tab 1 — Test Classifier ────────────────────────────────────────────────────
-with tab1:
-    st.header("Test Classification")
-    with st.form("test_form"):
-        subject = st.text_input("Subject")
-        body = st.text_area("Email Body")
-        submit = st.form_submit_button("Classify", icon=":material/send:")
+classifier = load_system()
 
-        if submit and (subject or body):
-            db = get_db_session()
-            try:
-                req = EmailRequest(subject=subject, body=body)
-                res = classify_email(req, db)
-                st.success(f"Predicted Label: **{res.label}** (Confidence: {res.confidence:.2f})")
-                st.info(f"Action: {res.routed_to}")
-            except Exception as e:
-                st.error(f"Error: {e}")
-            finally:
-                db.close()
+def push_file_to_github(filepath: str, content: str):
+    """Creates a new file in the GitHub repository using the GitHub REST API."""
+    token = st.secrets.get("GITHUB_TOKEN")
+    repo = st.secrets.get("GITHUB_REPO", "OWNER/REPO")
+    if not token or repo == "OWNER/REPO":
+        # Fallback to local save if no GitHub token is provided (for local testing)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "w") as f:
+            f.write(content)
+        return
 
-# ── Tab 2 — Human Review Queue ─────────────────────────────────────────────────
-with tab2:
-    st.header("Pending Review Queue")
-    st.write("Tickets with low confidence requiring human validation.")
+    url = f"https://api.github.com/repos/{repo}/contents/{filepath}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    data = {
+        "message": f"Add feedback {filepath}",
+        "content": encoded_content
+    }
+    
+    # Retry logic
+    for _ in range(3):
+        try:
+            resp = requests.put(url, headers=headers, json=data)
+            if resp.status_code in [201, 200]:
+                break
+        except Exception:
+            time.sleep(2)
 
-    # Resolve label options from the loaded model
-    label_options = loader.model.classes_.tolist() if loader.is_loaded() else []
+def trigger_github_action():
+    """Triggers the retrain pipeline via repository_dispatch."""
+    token = st.secrets.get("GITHUB_TOKEN")
+    repo = st.secrets.get("GITHUB_REPO", "OWNER/REPO")
+    if not token or repo == "OWNER/REPO":
+        return
 
-    db = get_db_session()
-    try:
-        tickets = get_tickets("pending_review", db)
-        if not tickets:
-            st.success("Queue is empty! All caught up.", icon=":material/done_all:")
-        for t in tickets:
-            with st.expander(f"Ticket #{t.id} — {t.subject}"):
-                st.write(f"**Predicted:** `{t.predicted_label}` ({t.confidence:.2f})")
-                st.write(f"**Body:** {t.body}")
+    url = f"https://api.github.com/repos/{repo}/dispatches"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    payload = {
+        "event_type": "retrain",
+        "client_payload": {
+            "source": "streamlit"
+        }
+    }
+    
+    for _ in range(3):
+        try:
+            resp = requests.post(url, headers=headers, json=payload)
+            if resp.status_code == 204:
+                break
+        except Exception:
+            time.sleep(2)
 
-                with st.form(f"resolve_{t.id}"):
-                    st.write("### Resolution")
-                    default_idx = (
-                        label_options.index(t.predicted_label)
-                        if t.predicted_label in label_options else 0
+def save_feedback(text: str, predicted_label: str, human_label: str):
+    """Save corrected label as an immutable JSON file via GitHub API."""
+    feedback_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+    
+    feedback_data = {
+        "id": feedback_id,
+        "text": text,
+        "label": predicted_label,
+        "corrected_label": human_label,
+        "timestamp": now.isoformat() + "Z"
+    }
+    
+    # Partitioned path: data/feedback/YYYY/MM/DD/fb_uuid.json
+    filepath = f"data/feedback/{now.strftime('%Y/%m/%d')}/fb_{feedback_id}.json"
+    json_content = json.dumps(feedback_data, indent=2)
+    
+    # 1. Push immutable record
+    push_file_to_github(filepath, json_content)
+    
+    # 2. Trigger async pipeline
+    trigger_github_action()
+    
+    st.toast("Feedback saved! Model will be retrained in the background.", icon="🚀")
+
+
+st.title(":material/support_agent: Email Ticket Classifier CLP")
+
+st.header("Test Classification")
+with st.form("test_form"):
+    subject = st.text_input("Subject")
+    body = st.text_area("Email Body")
+    submit = st.form_submit_button("Classify", icon=":material/send:")
+
+    if submit and (subject or body):
+        text_input = f"{subject} {body}".strip()
+        try:
+            # Inference
+            res = classifier(text_input)
+            if isinstance(res, list) and len(res) > 0:
+                prediction = res[0]
+            else:
+                prediction = {"label": "unknown", "score": 0.0}
+            
+            st.session_state.current_text = text_input
+            st.session_state.predicted_label = prediction["label"]
+            st.session_state.confidence = prediction["score"]
+        except Exception as e:
+            st.error(f"Error during inference: {e}")
+
+if "predicted_label" in st.session_state:
+    st.success(f"Predicted Label: **{st.session_state.predicted_label}** (Confidence: {st.session_state.confidence:.2f})")
+    
+    with st.expander("Is this prediction incorrect?", expanded=True):
+        st.write("Provide feedback to continuously improve the model.")
+        with st.form("feedback_form"):
+            # Dummy labels since we don't have model classes explicitly loaded here
+            options = ["billing_issue", "technical_support", "account_access", "general_inquiry", "other"]
+            default_idx = options.index(st.session_state.predicted_label) if st.session_state.predicted_label in options else 0
+            
+            corrected_label = st.selectbox("Correct Label", options=options, index=default_idx)
+            if st.form_submit_button("Submit Feedback", type="primary"):
+                if corrected_label == st.session_state.predicted_label:
+                    st.warning("The corrected label is the same as the predicted label.")
+                else:
+                    save_feedback(
+                        text=st.session_state.current_text, 
+                        predicted_label=st.session_state.predicted_label, 
+                        human_label=corrected_label
                     )
-                    new_label = st.selectbox(
-                        "Correct Label",
-                        options=label_options,
-                        index=default_idx,
-                        help="Select the correct category. This will be used to retrain the model.",
-                    )
-                    response_email = st.text_area("Email Response Draft")
-
-                    if st.form_submit_button(
-                        "Send Email & Resolve",
-                        type="primary",
-                        icon=":material/send_and_archive:",
-                    ):
-                        # 1. Persist corrected label for retraining
-                        save_feedback(t, new_label)
-                        # 2. Mark ticket resolved in DB
-                        req = ResolveRequest(human_label=new_label, response_email=response_email)
-                        resolve_res = resolve_ticket(t.id, req, db)
-                        if resolve_res:
-                            st.success("Resolved! Label saved for model retraining.")
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error("Failed to resolve ticket.")
-    except Exception as e:
-        st.error(f"Could not load queue: {e}")
-    finally:
-        db.close()
-
-# ── Tab 3 — History ────────────────────────────────────────────────────────────
-with tab3:
-    st.header("Processed & Sent History")
-
-    db = get_db_session()
-    try:
-        tickets = get_tickets("resolved", db)
-        if not tickets:
-            st.info("No resolved tickets yet.", icon=":material/info:")
-        for t in tickets:
-            with st.container(border=True):
-                st.write(f"**Ticket #{t.id}:** {t.subject}")
-                st.write(
-                    f"**Original Prediction:** `{t.predicted_label}` "
-                    f"| **Final Label:** `{t.human_label}`"
-                )
-                st.write(f"**Sent Email:**\n> {t.response_email}")
-    except Exception as e:
-        st.error(f"Could not load history: {e}")
-    finally:
-        db.close()
+                    del st.session_state.predicted_label
+                    time.sleep(1)
+                    st.rerun()
