@@ -4,11 +4,17 @@ import yaml
 import pickle
 import pandas as pd
 import torch
+import mlflow
 from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, classification_report
 from transformers import DistilBertTokenizer, DistilBertForSequenceClassification, pipeline
 
+
 def load_params():
     with open("params.yaml", "r") as f:
+        return yaml.safe_load(f)
+
+def load_configs():
+    with open("configs/config.yaml", "r") as f:
         return yaml.safe_load(f)
 
 def evaluate_baseline(test_path, vectorizer_path, model_path, out_metrics):
@@ -43,6 +49,14 @@ def evaluate_baseline(test_path, vectorizer_path, model_path, out_metrics):
         
     print(f"Baseline Metrics saved to {out_metrics}")
 
+    # Log to MLflow
+    configs = load_configs()
+    mlflow.set_tracking_uri(configs.get("mlflow", {}).get("tracking_uri", "sqlite:///mlflow.db"))
+    mlflow.set_experiment(configs.get("mlflow", {}).get("experiment_name", "email-ticket-classifier") + "-eval")
+    with mlflow.start_run(run_name="evaluate_baseline"):
+        mlflow.log_metrics(metrics)
+        mlflow.set_tag("model", "baseline")
+
 def evaluate_bert(test_path, model_path, out_metrics):
     print("Evaluating BERT Model...")
     if not os.path.exists(model_path):
@@ -73,6 +87,14 @@ def evaluate_bert(test_path, model_path, out_metrics):
         json.dump(metrics, f, indent=4)
         
     print(f"BERT Metrics saved to {out_metrics}")
+
+    # Log to MLflow
+    configs = load_configs()
+    mlflow.set_tracking_uri(configs.get("mlflow", {}).get("tracking_uri", "sqlite:///mlflow.db"))
+    mlflow.set_experiment(configs.get("mlflow", {}).get("experiment_name", "email-ticket-classifier") + "-eval")
+    with mlflow.start_run(run_name="evaluate_bert"):
+        mlflow.log_metrics(metrics)
+        mlflow.set_tag("model", "bert")
 
 if __name__ == "__main__":
     evaluate_baseline(
