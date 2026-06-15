@@ -113,17 +113,6 @@ def run_pipeline():
         
     # 5. Train BERT
     print("Training BERT model...")
-    # Map labels to integers
-    unique_labels = sorted(full_df["label"].unique())
-    label2id = {l: i for i, l in enumerate(unique_labels)}
-    id2label = {i: l for l, i in label2id.items()}
-    
-    full_df["label_id"] = full_df["label"].map(label2id)
-    
-    train_df, test_df = train_test_split(full_df, test_size=0.2, random_state=42)
-    
-    train_dataset = Dataset.from_pandas(train_df)
-    test_dataset = Dataset.from_pandas(test_df)
     
     # Continuous Learning: Start from the current best model, not from scratch
     hf_repo_id = os.environ.get("HF_REPO_ID", "")
@@ -140,10 +129,32 @@ def run_pipeline():
         
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
+        from transformers import AutoConfig
+        config = AutoConfig.from_pretrained(model_name)
+        if hasattr(config, "label2id") and config.label2id and len(config.label2id) > 2:
+            label2id = config.label2id
+            id2label = config.id2label
+        else:
+            raise ValueError("Config missing label2id")
     except Exception as e:
-        print(f"Failed to load tokenizer from {model_name}. Falling back to base model.")
+        print(f"Failed to load tokenizer/config from {model_name}. Falling back to base model.")
         model_name = "distilbert-base-uncased"
         tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # Fallback to the known 5 classes
+        known_classes = ["account_access", "billing", "bug_report", "refund_request", "shipping_delivery"]
+        label2id = {l: i for i, l in enumerate(known_classes)}
+        id2label = {i: l for l, i in label2id.items()}
+    
+    # Map labels to integers using the stable label2id mapping
+    # Drop rows with unknown labels to avoid errors
+    full_df = full_df[full_df["label"].isin(label2id.keys())]
+    full_df["label_id"] = full_df["label"].map(label2id)
+    unique_labels = list(label2id.keys())
+    
+    train_df, test_df = train_test_split(full_df, test_size=0.2, random_state=42)
+    
+    train_dataset = Dataset.from_pandas(train_df)
+    test_dataset = Dataset.from_pandas(test_df)
     
     def tokenize_function(examples):
         return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=128)
