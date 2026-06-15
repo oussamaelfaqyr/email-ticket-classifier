@@ -402,20 +402,17 @@ with tab2:
                     LABEL_OPTIONS.index(t.predicted_label)
                     if t.predicted_label in LABEL_OPTIONS else 0
                 )
-                new_label      = st.selectbox(
+                new_label = st.selectbox(
                     "Correct Label", options=LABEL_OPTIONS, index=default_idx,
                     help="Select the correct category. This trains the next model version.",
                 )
-                response_email = st.text_area(
-                    "Email Response Draft",
-                    placeholder="Type the response to send to the customer…",
-                )
+                
                 if st.form_submit_button(
-                    "Send Email & Resolve",
+                    "Validate & Resolve",
                     type="primary",
-                    icon=":material/send_and_archive:",
+                    icon=":material/done_all:",
                 ):
-                    save_feedback(t, new_label, response_email)
+                    save_feedback(t, new_label)
                     st.success(
                         "✅ Resolved! Label saved — model retraining triggered in background.",
                     )
