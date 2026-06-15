@@ -5,6 +5,8 @@ import json
 import uuid
 import shutil
 import pandas as pd
+import mlflow
+import mlflow.pytorch
 from datetime import datetime
 from pydantic import BaseModel, ValidationError
 from sklearn.model_selection import train_test_split
@@ -113,7 +115,11 @@ def run_pipeline():
         
     # 5. Train BERT
     print("Training BERT model...")
-    
+
+    # ── MLflow setup ─────────────────────────────────────────────────────────
+    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    mlflow.set_tracking_uri(mlflow_uri)
+    mlflow.set_experiment("email-ticket-classifier-clp")
     # Continuous Learning: Start from the current best model, not from scratch
     hf_repo_id = os.environ.get("HF_REPO_ID", "")
     
@@ -227,7 +233,40 @@ def run_pipeline():
     print("Pushing model to Hugging Face Hub...")
     run_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     version_tag = f"v{run_id}"
-    
+
+    # ── Log everything to MLflow ──────────────────────────────────────────────
+    with mlflow.start_run(run_name=f"clp_{version_tag}"):
+        # Params
+        mlflow.log_params({
+            "base_model":             model_name,
+            "num_labels":             len(unique_labels),
+            "labels":                 ",".join(unique_labels),
+            "learning_rate":          2e-5,
+            "num_train_epochs":       3,
+            "per_device_train_batch": 8,
+            "weight_decay":           0.01,
+            "max_length":             128,
+            "train_samples":          len(train_df),
+            "eval_samples":           len(test_df),
+            "total_feedback_files":   len(valid_files),
+            "min_batch_size":         min_batch,
+            "min_f1_threshold":       min_f1,
+        })
+        # Metrics
+        mlflow.log_metrics({
+            "eval_f1_macro":       f1_macro,
+            "eval_loss":           eval_results.get("eval_loss", 0.0),
+            "eval_runtime":        eval_results.get("eval_runtime", 0.0),
+        })
+        # Tags
+        mlflow.set_tags({
+            "version_tag":   version_tag,
+            "hf_repo":       hf_repo_id,
+            "quality_gate":  "passed",
+            "pipeline":      "CLP",
+        })
+        print(f"[MLflow] Run logged: clp_{version_tag} — F1={f1_macro:.4f}")
+
     # Push to the main branch so it's immediately visible
     model.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", revision="main")
     tokenizer.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", revision="main")
