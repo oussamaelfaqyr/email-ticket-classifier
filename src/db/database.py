@@ -10,9 +10,16 @@ if DATABASE_URL:
     # SQLAlchemy 1.4+ requires 'postgresql://' instead of 'postgres://'
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    
-    # Cloud database connection (PostgreSQL)
-    engine = create_engine(DATABASE_URL)
+
+    # Use pg8000 (pure Python driver, works on all Python versions)
+    if "+pg8000" not in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+pg8000://", 1)
+
+    # Cloud database connection (PostgreSQL) with SSL required by Railway
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"ssl_context": True}
+    )
 else:
     # Local fallback (SQLite)
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
