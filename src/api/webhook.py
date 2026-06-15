@@ -68,7 +68,7 @@ async def receive_email(request: Request):
         if resend.api_key:
             try:
                 resend.Emails.send({
-                    "from": "support@yourdomain.com", # Must be a verified domain
+                    "from": "support@neurodynamics.tech",
                     "to": target_email,
                     "subject": f"[{label.upper()}] FW: {subject}",
                     "text": f"Original Sender: {from_address}\nConfidence: {confidence:.0%}\n\n{text_body}"
