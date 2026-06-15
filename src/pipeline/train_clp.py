@@ -96,8 +96,8 @@ def run_pipeline():
             print(f"Error reading {file_path}. Moving to quarantine.")
             shutil.move(file_path, os.path.join(quarantine_dir, os.path.basename(file_path)))
             
-    if len(valid_files) < 50:
-        print("After validation, less than 50 samples remain. Skipping training.")
+    if len(valid_files) < min_batch:
+        print(f"After validation, less than {min_batch} samples remain. Skipping training.")
         sys.exit(0)
         
     # 4. Build Training Dataset
