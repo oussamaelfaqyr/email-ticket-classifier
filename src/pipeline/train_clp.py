@@ -228,9 +228,9 @@ def run_pipeline():
     run_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     version_tag = f"v{run_id}"
     
-    # We push using a specific revision/branch
-    model.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", revision=version_tag)
-    tokenizer.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", revision=version_tag)
+    # Push to the main branch so it's immediately visible
+    model.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", revision="main")
+    tokenizer.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", revision="main")
     
     # 8. Update model_pointers.json
     api = HfApi(token=hf_token)
@@ -242,7 +242,8 @@ def run_pipeline():
         pointers = {"active": "main", "stable": "main"}
         
     pointers["stable"] = pointers.get("active", "main")
-    pointers["active"] = version_tag
+    pointers["active"] = "main"
+    pointers["last_run_tag"] = version_tag
     
     with open("model_pointers.json", "w") as f:
         json.dump(pointers, f, indent=2)
