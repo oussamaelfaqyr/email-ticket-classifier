@@ -313,10 +313,11 @@ with st.sidebar:
 # ═══════════════════════════════════════════════════════════════════════════════
 st.title(":material/support_agent: Email Ticket Classifier Dashboard")
 
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     ":material/science: Test Classifier",
     ":material/pending_actions: Human Review Queue",
     ":material/mark_email_read: Processed & Sent",
+    ":material/settings: Settings",
 ])
 
 # ── Tab 1 — Test Classifier ────────────────────────────────────────────────────
@@ -372,8 +373,8 @@ with tab2:
     try:
         tickets = (
             db.query(Ticket)
-            .filter(Ticket.status == "pending_review")
-            .order_by(Ticket.created_at.desc())
+            .filter(Ticket.status.in_(["pending_review", "auto_routed"]))
+            .order_by(Ticket.status.desc(), Ticket.created_at.desc())
             .all()
         )
     except Exception as e:
@@ -385,10 +386,11 @@ with tab2:
     if not tickets:
         st.success("Queue is empty! All caught up. ✅", icon=":material/done_all:")
     else:
-        st.info(f"{len(tickets)} ticket(s) awaiting review.")
+        st.info(f"{len(tickets)} ticket(s) awaiting validation.")
 
     for t in tickets:
-        with st.expander(f"Ticket #{t.id} — {t.subject}", expanded=False):
+        status_badge = "🚀 Auto-Routed (Needs Validation)" if t.status == "auto_routed" else "⏳ Pending Review"
+        with st.expander(f"Ticket #{t.id} — {t.subject} [{status_badge}]", expanded=False):
             col1, col2 = st.columns([3, 1])
             with col1:
                 st.write(f"**Body:** {t.body}")
@@ -397,7 +399,7 @@ with tab2:
                 st.metric("Confidence", f"{t.confidence:.0%}")
 
             with st.form(f"resolve_{t.id}"):
-                st.write("### Resolution")
+                st.write("### Validation")
                 default_idx = (
                     LABEL_OPTIONS.index(t.predicted_label)
                     if t.predicted_label in LABEL_OPTIONS else 0
@@ -427,7 +429,7 @@ with tab3:
     try:
         resolved = (
             db.query(Ticket)
-            .filter(Ticket.status.in_(["resolved", "auto_routed"]))
+            .filter(Ticket.status == "resolved")
             .order_by(Ticket.created_at.desc())
             .all()
         )
@@ -458,3 +460,32 @@ with tab3:
                 st.write(f"{status_icon} `{t.status}`")
                 if t.created_at:
                     st.caption(t.created_at.strftime("%Y-%m-%d %H:%M"))
+
+# ── Tab 4 — Settings ───────────────────────────────────────────────────────────
+with tab4:
+    st.header("Routing Settings")
+    st.write("Map each ticket category to the destination email address.")
+    
+    settings_file = "configs/routing.json"
+    os.makedirs(os.path.dirname(settings_file), exist_ok=True)
+    
+    # Load existing settings
+    if os.path.exists(settings_file):
+        with open(settings_file, "r") as f:
+            routing_settings = json.load(f)
+    else:
+        routing_settings = {label: "" for label in LABEL_OPTIONS}
+        
+    with st.form("settings_form"):
+        new_settings = {}
+        for label in LABEL_OPTIONS:
+            new_settings[label] = st.text_input(
+                f"Email for '{label}'", 
+                value=routing_settings.get(label, ""),
+                placeholder=f"e.g. {label.replace('_', '')}@yourcompany.com"
+            )
+            
+        if st.form_submit_button("Save Settings", type="primary", icon=":material/save:"):
+            with open(settings_file, "w") as f:
+                json.dump(new_settings, f, indent=2)
+            st.success("Routing settings saved successfully!")
