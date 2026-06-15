@@ -1,0 +1,9 @@
+{
+  "id": "ded2a71c-95b5-4e43-95e6-e59b6db0bc5b",
+  "ticket_db_id": 1,
+  "text": "Account locked out - Cannot login I cannot log into my account since yesterday. Please help.",
+  "label": "account_access",
+  "corrected_label": "account_access",
+  "confidence": 0.9606736302375793,
+  "timestamp": "2026-06-15T21:34:10.926711Z"
+}
