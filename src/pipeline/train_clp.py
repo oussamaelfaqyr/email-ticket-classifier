@@ -4,18 +4,23 @@ import glob
 import json
 import uuid
 import shutil
+import numpy as np
 import pandas as pd
 import mlflow
 import mlflow.pytorch
 from datetime import datetime
 from pydantic import BaseModel, ValidationError
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score
+from sklearn.metrics import (
+    f1_score, accuracy_score,
+    precision_score, recall_score,
+    classification_report
+)
 from datasets import Dataset
 from transformers import (
-    AutoTokenizer, 
-    AutoModelForSequenceClassification, 
-    Trainer, 
+    AutoTokenizer,
+    AutoModelForSequenceClassification,
+    Trainer,
     TrainingArguments
 )
 from huggingface_hub import HfApi, hf_hub_download
@@ -183,9 +188,14 @@ def run_pipeline():
     
     def compute_metrics(pred):
         labels = pred.label_ids
-        preds = pred.predictions.argmax(-1)
-        f1_macro = f1_score(labels, preds, average="macro")
-        return {"f1_macro": f1_macro}
+        preds  = pred.predictions.argmax(-1)
+        return {
+            "f1_macro":   f1_score(labels, preds, average="macro"),
+            "f1_weighted": f1_score(labels, preds, average="weighted"),
+            "accuracy":   accuracy_score(labels, preds),
+            "precision":  precision_score(labels, preds, average="macro", zero_division=0),
+            "recall":     recall_score(labels, preds, average="macro", zero_division=0),
+        }
         
     training_args = TrainingArguments(
         output_dir="./models/clp_checkpoints",
@@ -211,14 +221,36 @@ def run_pipeline():
     
     # 6. Evaluation Gate
     eval_results = trainer.evaluate()
-    f1_macro = eval_results.get("eval_f1_macro", 0.0)
-    print(f"Evaluation F1-Macro: {f1_macro:.4f}")
-    
+    f1_macro    = eval_results.get("eval_f1_macro",    0.0)
+    f1_weighted = eval_results.get("eval_f1_weighted", 0.0)
+    accuracy    = eval_results.get("eval_accuracy",    0.0)
+    precision   = eval_results.get("eval_precision",   0.0)
+    recall      = eval_results.get("eval_recall",      0.0)
+    eval_loss   = eval_results.get("eval_loss",        0.0)
+
+    # Per-class report
+    test_preds  = trainer.predict(test_dataset)
+    pred_labels = test_preds.predictions.argmax(-1)
+    true_labels = test_preds.label_ids
+    report = classification_report(
+        true_labels, pred_labels,
+        target_names=unique_labels,
+        output_dict=True,
+        zero_division=0
+    )
+
+    print(f"Evaluation Results:")
+    print(f"  F1-Macro:    {f1_macro:.4f}")
+    print(f"  F1-Weighted: {f1_weighted:.4f}")
+    print(f"  Accuracy:    {accuracy:.4f}")
+    print(f"  Precision:   {precision:.4f}")
+    print(f"  Recall:      {recall:.4f}")
+
     min_f1 = float(os.environ.get("MIN_F1_SCORE", "0.85"))
     if f1_macro < min_f1:
         print(f"F1-Macro is below {min_f1}. Failing pipeline to prevent bad model deployment.")
         sys.exit(1)
-        
+
     print("Model passed evaluation gate!")
     
     # 7. Push to Hugging Face Hub
@@ -252,12 +284,24 @@ def run_pipeline():
             "min_batch_size":         min_batch,
             "min_f1_threshold":       min_f1,
         })
-        # Metrics
+        # Core metrics
         mlflow.log_metrics({
-            "eval_f1_macro":       f1_macro,
-            "eval_loss":           eval_results.get("eval_loss", 0.0),
-            "eval_runtime":        eval_results.get("eval_runtime", 0.0),
+            "eval_f1_macro":    f1_macro,
+            "eval_f1_weighted": f1_weighted,
+            "eval_accuracy":    accuracy,
+            "eval_precision":   precision,
+            "eval_recall":      recall,
+            "eval_loss":        eval_loss,
         })
+        # Per-class metrics
+        for lbl in unique_labels:
+            if lbl in report:
+                mlflow.log_metrics({
+                    f"{lbl}_precision": report[lbl]["precision"],
+                    f"{lbl}_recall":    report[lbl]["recall"],
+                    f"{lbl}_f1":        report[lbl]["f1-score"],
+                    f"{lbl}_support":   report[lbl]["support"],
+                })
         # Tags
         mlflow.set_tags({
             "version_tag":   version_tag,
@@ -265,7 +309,7 @@ def run_pipeline():
             "quality_gate":  "passed",
             "pipeline":      "CLP",
         })
-        print(f"[MLflow] Run logged: clp_{version_tag} — F1={f1_macro:.4f}")
+        print(f"[MLflow] Run logged: clp_{version_tag} — F1={f1_macro:.4f}  Acc={accuracy:.4f}")
 
     # Push to the main branch so it's immediately visible
     model.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", revision="main")
