@@ -42,3 +42,31 @@ stages:
       - training.baseline.max_iter
     outs:
       - models/baseline.pkl
+
+  train_bert:
+    cmd: python -m src.training.bert.train
+    deps:
+      - data/processed/train.csv
+      - data/processed/test.csv
+      - src/training/bert/train.py
+    params:
+      - training.bert.model_name
+      - training.bert.learning_rate
+      - training.bert.epochs
+      - training.bert.batch_size
+      - training.bert.max_length
+    outs:
+      - models/bert_model
+
+  evaluate:
+    cmd: python -m src.evaluation.evaluate
+    deps:
+      - data/processed/test.csv
+      - models/baseline.pkl
+      - models/bert_model
+      - src/evaluation/evaluate.py
+    metrics:
+      - reports/metrics_baseline.json:
+          cache: false
+      - reports/metrics_bert.json:
+          cache: false
