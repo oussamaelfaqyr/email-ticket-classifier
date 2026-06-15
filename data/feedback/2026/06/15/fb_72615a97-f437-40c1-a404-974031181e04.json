@@ -1,0 +1,9 @@
+{
+  "id": "72615a97-f437-40c1-a404-974031181e04",
+  "ticket_db_id": 2,
+  "text": "Urgent: Locked out of account after subscription renewal Hello Support Team,\n\nI am experiencing multiple issues with my account after my annual subscription was renewed yesterday.\n\nFirst, I can no longer log in using my usual credentials. The system says that my account does not exist, even though I have been using the same email address for over two years. I attempted several password resets, but the reset emails never arrived.\n\nSecond, I received a notification from my bank confirming that the subscription payment was successfully processed, and the amount was deducted from my account. However, when I try to access the platform from another device, I am shown a message indicating that my subscription has expired and that I need to upgrade my plan.\n\nI also noticed that some of my previously saved projects appear to be missing. This is concerning because several of them are related to ongoing client work with upcoming deadlines.\n\nCould you investigate whether my account was accidentally deactivated, duplicated, or linked to another email address during the renewal process? I would appreciate an urgent resolution as this issue is impacting my work.\n\nThank you,\n\nMichael Thompson",
+  "label": "account_access",
+  "corrected_label": "account_access",
+  "confidence": 0.9094519019126892,
+  "timestamp": "2026-06-15T20:56:46.941761Z"
+}
