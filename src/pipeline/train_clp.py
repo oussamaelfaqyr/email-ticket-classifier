@@ -229,8 +229,8 @@ def run_pipeline():
     version_tag = f"v{run_id}"
     
     # We push using a specific revision/branch
-    model.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", branch=version_tag)
-    tokenizer.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", branch=version_tag)
+    model.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", revision=version_tag)
+    tokenizer.push_to_hub(hf_repo_id, token=hf_token, commit_message=f"CLP run {version_tag}", revision=version_tag)
     
     # 8. Update model_pointers.json
     api = HfApi(token=hf_token)
