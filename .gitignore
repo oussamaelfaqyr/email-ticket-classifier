@@ -57,3 +57,10 @@ mlflow.db
 # OS files
 .DS_Store
 Thumbs.db
+
+# Streamlit secrets (NEVER commit this)
+.streamlit/secrets.toml
+
+# CLP checkpoint artifacts (large, stay on HF Hub)
+models/clp_checkpoints/
+model_pointers.json
