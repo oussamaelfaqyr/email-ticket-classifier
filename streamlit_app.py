@@ -88,8 +88,8 @@ predict_fn, _label_list = load_classifier()
 
 # Derive label list (for dropdowns). Works for both HF and sklearn.
 LABEL_OPTIONS = _label_list or [
-    "billing_issue", "technical_support", "account_access",
-    "general_inquiry", "other"
+    # Real classes from models/baseline.pkl — keep in sync with training data
+    "account_access", "billing", "bug_report", "refund_request", "shipping_delivery"
 ]
 
 def determine_routing(label: str, confidence: float) -> str:
