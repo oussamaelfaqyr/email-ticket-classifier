@@ -1,275 +1,531 @@
 # Email Ticket Classifier — MLOps Project Documentation
 
-> A two-stage NLP classification system trained on a Kaggle database and fine-tuned on real-world email corpora, deployed as a production MLOps pipeline with automated retraining and live email integration.
+> A production-grade, fully automated email classification and routing system powered by a fine-tuned DistilBERT Transformer, deployed across a multi-cloud MLOps stack with continuous learning, human-in-the-loop validation, and live email automation via Resend.
 
 | Field | Value |
 |---|---|
-| Architecture | Two-stage NLP + MLOps |
-| Models | DistilBERT / TF-IDF + LR |
-| Serving | FastAPI + Docker |
-| Tracking | MLflow + DVC |
-| Status | Design Specification |
+| **Architecture** | DistilBERT Transformer + Sklearn Baseline |
+| **Transformer** | `distilbert-base-uncased` (66M params, 6 layers) |
+| **Training Strategy** | Continuous Learning Pipeline (CLP) with GitHub Actions |
+| **Model Registry** | Hugging Face Hub (`ouel/bert-ticket-classifier`) |
+| **Serving** | FastAPI (Railway) + Streamlit Cloud Dashboard |
+| **Database** | PostgreSQL (Railway) — shared between all services |
+| **Email Automation** | Resend Inbound Webhooks → Auto-routing |
+| **Status** | ✅ Production |
 
 ---
 
 ## 01 — Project Overview
 
-The system automatically classifies inbound support emails into structured categories, routes them to the appropriate team or ticketing system, and continuously improves through human feedback. It follows the same two-stage training strategy used in production AI systems: first learning on a clean Kaggle database, then adapting to messy real-world language.
+The system automatically classifies inbound support emails into 5 structured categories, instantly routes them to the correct department via Resend, and continuously improves through human validation feedback. Every human correction is automatically committed to GitHub as a training event, triggering a model retrain through GitHub Actions when enough corrections accumulate.
 
-**Key capabilities**
+**Key capabilities:**
 
-- Automated inbox triage — no manual sorting required
-- Two-stage NLP training on a Kaggle database then real-world data
-- Continuous retraining triggered by drift detection
-- Quality gates enforced in CI/CD — no model ships below F1 0.85
-- Drift monitoring with Evidently AI in production
-- Human-in-the-loop feedback that feeds the next retrain cycle
-
-> **Target metric:** F1-score of 0.85 or above across all four categories is enforced as a CI quality gate. No model is promoted to production below this threshold.
+- ⚡ **Real-time email ingestion** — Resend webhooks fire on every inbound email, triggering classification within milliseconds
+- 🧠 **DistilBERT Transformer** — fine-tuned sequence classifier with 66M parameters and 97% of BERT's accuracy at 60% of the compute cost
+- 🔁 **Continuous Learning Pipeline (CLP)** — GitHub Actions retrains the live model on accumulated human corrections automatically
+- 🔒 **Quality gate** — no model ships to production below a configurable F1 threshold
+- 🗂️ **Universal validation queue** — every ticket (auto-routed or flagged) appears in the human queue for ground-truth labeling
+- 🌍 **Multi-cloud architecture** — Streamlit Cloud (dashboard), Railway (API + PostgreSQL), Hugging Face Hub (model registry)
 
 ---
 
-## 02 — Training Pipeline
+## 02 — Transformer Architecture (Core Model)
 
-Training is split into two sequential stages. The first stage builds a reliable baseline using a clean, controlled Kaggle database. The second stage adapts that baseline to real-world noise, abbreviations, and domain-specific language using the Enron corpus and live support ticket archives.
+This is the most critical component of the system. The production model is a **DistilBERT fine-tuned sequence classifier** trained on labeled support email text.
 
-### Stage 01 — Kaggle database training
+### 2.1 — What is DistilBERT?
 
-- Kaggle dataset supplies labeled email samples per category
-- Balanced class distribution enforced across all labels
-- TF-IDF + Logistic Regression trained as fast baseline model
-- Every run logged to MLflow with full parameter set
-- Validates the pipeline end-to-end before touching real data
+DistilBERT is a distilled (compressed) version of BERT (Bidirectional Encoder Representations from Transformers), developed by Hugging Face in 2019. It is trained using **knowledge distillation** — a technique where a smaller "student" model is trained to mimic the behavior of a larger "teacher" model (BERT-base).
 
-### Stage 02 — Real-world fine-tuning
-
-- Enron corpus + support ticket archive as source data
-- Header stripping, deduplication, tokenization applied
-- DistilBERT fine-tuned with low learning rate (domain adaptation)
-- Optuna runs hyperparameter optimization with pruning
-- Champion vs challenger comparison before any promotion
-
-### Data flow
-
-```
-Raw emails  →  Preprocess  →  Features  →  Train  →  Evaluate  →  Registry
-(Kaggle         (clean +       (TF-IDF /    (stage     (F1 quality   (MLflow
- + Enron)        tokenize)      embeddings)  1 → 2)     gate)          promote)
-```
-
-All stages are defined as DVC pipeline nodes in `dvc.yaml`. Running `dvc repro` recomputes only the stages whose inputs have changed, making reruns fast and reproducible.
-
----
-
-## 03 — Classification Categories
-
-The model outputs one of four labels per email, along with a confidence score between 0 and 1. Routing behavior is conditioned on both the label and the confidence threshold.
-
-| Label | Description | Auto-route destination | Threshold |
-|---|---|---|---|
-| `bug_report` | Crashes, unexpected behavior, data errors | Jira / Linear — engineering queue | `>= 0.85` |
-| `billing` | Charges, refunds, subscription questions | Zendesk — billing team | `>= 0.85` |
-| `feature_request` | Product suggestions, improvement ideas | Slack — #product channel | `>= 0.85` |
-| `general` | Account help, how-to, other queries | Zendesk — default support queue | `>= 0.80` |
-
-> **Human review queue:** Any prediction with confidence below the threshold is routed to human review rather than auto-routed. Agent labels on these cases feed back into the next retraining cycle.
-
----
-
-## 04 — Email Integration Architecture
-
-Inbound emails arrive at `support@yourapp.com` and are converted into structured webhook events by the email provider. A FastAPI receiver parses each event, extracts subject and body, strips signatures and quoted history, then pushes to a Redis queue for async classification.
-
-### End-to-end flow
-
-```
-Inbox
-  |
-  v
-Email provider  (SendGrid Inbound Parse / Mailgun / Gmail API / IMAP poll)
-  |
-  v
-POST /inbound   (FastAPI webhook receiver — parse, strip, enqueue)
-  |
-  v
-Redis queue     (async buffer — decouples receiving from classifying)
-  |
-  v
-POST /classify  (ML classifier — label + confidence score)
-  |
-  v
-Routing logic   (confidence threshold check)
-  |
-  +---> >= 0.85 high conf  -->  auto-route to destination
-  +---> 0.60–0.85 medium   -->  route with review flag
-  +---> < 0.60 low conf    -->  human review queue
-```
-
-### Email provider options
-
-**SendGrid Inbound Parse** — recommended starting point. Configure an MX record and SendGrid POSTs every inbound email as multipart form data to your webhook URL. Free tier covers most projects. 5-minute setup.
-
-**Mailgun Routes** — same webhook model, slightly more flexible pre-filtering rules before the webhook fires. Good if you need routing rules at the provider level.
-
-**Gmail API + Pub/Sub** — if the inbox is already a Gmail account. Subscribe to push notifications via Google Cloud Pub/Sub. No MX record changes required.
-
-**IMAP polling** — simplest of all. `imaplib` or `aioimaplib` polling every 30 seconds. Works with any mailbox. Not real-time but sufficient for low volume.
-
-### Routing destinations
-
-| Destination | Label | Integration |
+| Property | BERT-base | DistilBERT |
 |---|---|---|
-| Jira / Linear | `bug_report` | REST API — creates ticket with assignee, priority, label |
-| Zendesk | `billing` | REST API — lands in billing group inbox with category tag |
-| Slack `#product` | `feature_request` | Slack API — posts summary card with sender and subject |
-| Zendesk | `general` | REST API — default support queue |
-| Human review | any low confidence | Internal queue — agent re-labels, correction written back |
-| Auto-reply | all | Sends acknowledgment email with category and expected SLA |
+| Parameters | 110M | **66M** |
+| Layers (Transformer blocks) | 12 | **6** |
+| Hidden dimension | 768 | **768** |
+| Attention heads | 12 | **12** |
+| Inference speed | 1× baseline | **1.6× faster** |
+| Accuracy retention | 100% | **97% of BERT** |
+| Memory footprint | ~440 MB | **~265 MB** |
 
-### Confidence-gated routing (Python sketch)
+### 2.2 — Transformer Block (Detailed)
+
+Each of the **6 Transformer encoder blocks** in DistilBERT is composed of the following sub-layers:
+
+```
+Input Tokens (WordPiece tokenized)
+        │
+        ▼
+┌──────────────────────────────────────────────┐
+│           Token Embeddings (768-dim)          │
+│  = WordPiece Embedding                        │
+│  + Position Embedding                         │
+│  (Note: No segment/token-type embedding       │
+│   unlike BERT — this is the key difference)   │
+└──────────────────────────────────────────────┘
+        │
+        ▼ × 6 blocks
+┌──────────────────────────────────────────────┐
+│         Multi-Head Self-Attention             │
+│                                              │
+│  Q = W_q · x,  K = W_k · x,  V = W_v · x   │
+│                                              │
+│         QK^T                                 │
+│  Attn = ─────── · V   (scaled dot-product)   │
+│          √d_k                                │
+│                                              │
+│  12 attention heads, each with dim = 64      │
+│  (12 × 64 = 768 total)                       │
+└──────────────────────────────────────────────┘
+        │
+        ▼
+┌──────────────────────────────────────────────┐
+│     Add & LayerNorm  (residual connection)    │
+└──────────────────────────────────────────────┘
+        │
+        ▼
+┌──────────────────────────────────────────────┐
+│        Feed-Forward Network (FFN)             │
+│                                              │
+│  FFN(x) = GELU(x · W₁ + b₁) · W₂ + b₂      │
+│  Intermediate dim: 3072  (4 × hidden)        │
+│  Activation: GELU (not ReLU like BERT)        │
+└──────────────────────────────────────────────┘
+        │
+        ▼
+┌──────────────────────────────────────────────┐
+│     Add & LayerNorm  (residual connection)    │
+└──────────────────────────────────────────────┘
+        │
+        ▼ (after all 6 blocks)
+┌──────────────────────────────────────────────┐
+│     [CLS] token representation (768-dim)      │
+│     (used as the sentence embedding)          │
+└──────────────────────────────────────────────┘
+        │
+        ▼
+┌──────────────────────────────────────────────┐
+│        Classification Head                    │
+│                                              │
+│  Linear(768 → 768) + GELU + Dropout(0.2)     │
+│  Linear(768 → num_labels)                    │
+│  Softmax → probability over 5 classes        │
+└──────────────────────────────────────────────┘
+```
+
+### 2.3 — Key Architectural Differences vs. BERT
+
+| Feature | BERT | DistilBERT | Impact |
+|---|---|---|---|
+| Segment embeddings | ✅ Yes | ❌ Removed | Smaller embedding table |
+| Pooler layer | ✅ Yes | ❌ Removed | Less post-processing |
+| Number of layers | 12 | **6** | 2× faster forward pass |
+| NSP (Next Sentence Prediction) | ✅ Trained on | ❌ Removed | Simplified pre-training |
+| Distillation loss | ❌ No | ✅ Cosine + CE + MLM | Better compression |
+
+### 2.4 — Tokenization
+
+The model uses **WordPiece tokenization** (vocabulary of 30,522 tokens):
+
+```
+Input:  "I cannot access my account since yesterday"
+Tokens: [CLS] I cannot access my account since yesterday [SEP]
+IDs:    [101, 1045, 3685, 3229, 2026, 4070, 2144, 7483, 102]
+```
+
+- Maximum sequence length: **512 tokens**
+- Longer texts are truncated to 512 tokens during inference
+- `[CLS]` token embedding is used as the document representation for classification
+
+### 2.5 — Fine-tuning Configuration
+
+The pre-trained `distilbert-base-uncased` weights are fine-tuned end-to-end with the following hyperparameters (stored in `params.yaml`):
+
+```yaml
+model:
+  name: distilbert-base-uncased
+  num_labels: 5
+  max_length: 512
+
+training:
+  learning_rate: 2.0e-5          # standard BERT fine-tuning LR
+  num_train_epochs: 3
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 32
+  warmup_ratio: 0.1              # 10% of steps used for LR warm-up
+  weight_decay: 0.01             # L2 regularisation
+  evaluation_strategy: epoch
+  save_strategy: epoch
+  load_best_model_at_end: true
+  metric_for_best_model: eval_f1
+
+optimizer: AdamW                 # with decoupled weight decay
+scheduler: linear_with_warmup
+```
+
+### 2.6 — Classification Labels (id2label mapping)
 
 ```python
-def route(label: str, confidence: float, email: dict):
-    if confidence >= 0.85:
-        auto_route(label, email)           # straight to destination
-    elif confidence >= 0.60:
-        route_with_flag(label, email)      # routed but flagged for spot-check
-    else:
-        send_to_human_review(email)        # agent labels → training data
+id2label = {
+    0: "account_access",    # Login issues, password resets, locked accounts
+    1: "billing",           # Charges, invoices, subscription problems
+    2: "bug_report",        # Software crashes, unexpected behavior, errors
+    3: "refund_request",    # Refund demands, chargeback requests
+    4: "shipping_delivery", # Delivery status, lost packages, delays
+}
 ```
 
 ---
 
-## 05 — Technology Stack
+## 03 — Continuous Learning Pipeline (CLP)
 
-| Component | Tool | Purpose |
-|---|---|---|
-| Data versioning | DVC | Reproducible pipeline, dataset and model artifact versioning |
-| Experiment tracking | MLflow | Log every run, compare metrics, promote to registry |
-| NLP model | HuggingFace Transformers | DistilBERT fine-tuning, tokenizer, inference |
-| Baseline model | scikit-learn | TF-IDF vectorizer + logistic regression stage 1 |
-| Hyperparameter search | Optuna | Automated HPO with pruning and study persistence |
-| Serving | FastAPI + Uvicorn | REST inference endpoint, webhook receiver, health check |
-| Containerization | Docker + Compose | App + MLflow + Prometheus in one compose stack |
-| Monitoring | Prometheus + Grafana | Latency, throughput, prediction distribution dashboards |
-| Drift detection | Evidently AI | Data and concept drift alerts, auto-retrain trigger |
-| CI/CD | GitHub Actions | Lint, test, quality gate, build Docker, push, deploy |
-| Email ingestion | SendGrid Inbound Parse | Convert inbound email to webhook POST events |
-| Task queue | Redis + Celery | Async email processing, retrain job scheduling |
+The CLP is the ML automation backbone. It runs as a GitHub Actions workflow triggered either automatically via `repository_dispatch` from the Streamlit dashboard or manually.
+
+### 3.1 — Pipeline Flow
+
+```
+Human validates ticket in Streamlit
+        │
+        ▼
+save_feedback() pushes fb_<uuid>.json to GitHub
+  data/feedback/YYYY/MM/DD/fb_<uuid>.json
+        │
+        ▼
+GitHub Actions: repository_dispatch fires ("retrain" event)
+        │
+        ▼
+train_clp.py — Continuous Learning Pipeline
+        │
+        ├── 1. Scan data/feedback/**/*.json
+        │       Count unprocessed events
+        │       Check MIN_BATCH_SIZE gate (default: 10)
+        │
+        ├── 2. Build training dataset
+        │       Load all feedback JSON files
+        │       Extract: text = subject + body
+        │       Extract: label = corrected_label (human ground truth)
+        │       Train/eval split: 80/20
+        │
+        ├── 3. Load current production model from Hugging Face Hub
+        │       Pull: ouel/bert-ticket-classifier (main branch)
+        │       Preserves all weights from previous training
+        │
+        ├── 4. Fine-tune on new feedback data
+        │       HuggingFace Trainer with above config
+        │       Continues from existing weights (not from scratch)
+        │
+        ├── 5. Evaluate on held-out split
+        │       Compute: accuracy, F1, precision, recall
+        │       Compare against QUALITY_THRESHOLD
+        │
+        ├── 6. Quality gate check
+        │   If F1 >= threshold:
+        │       Push new model weights to HF Hub (main branch)
+        │       Update model_pointers.json with new version tag
+        │       Mark feedback files as processed
+        │   Else:
+        │       Skip — model not promoted
+        │
+        └── 7. Mark feedback events as processed
+                Write processed_ids.json to prevent double-training
+```
+
+### 3.2 — Version Tagging
+
+Each trained model version is tagged with a timestamp: `v{YYYYMMDDHHMMSS}`.
+
+`model_pointers.json` tracks which version is live:
+```json
+{
+  "active": "v20260615171643",
+  "stable": "main"
+}
+```
+
+The Streamlit dashboard reads this file every 5 minutes and displays the active model version in the sidebar.
 
 ---
 
-## 06 — Project Structure
+## 04 — Email Automation Architecture
+
+### 4.1 — End-to-End Flow (Production)
+
+```
+Customer sends email to any@neurodynamics.tech
+        │
+        ▼
+Resend MX Servers (inbound-smtp.eu-west-1.amazonaws.com)
+        │  DNS MX record routes all email to Resend
+        ▼
+Resend Webhook → POST /webhook/resend
+        │  URL: email-ticket-classifier-production.up.railway.app
+        ▼
+FastAPI Webhook Receiver (Railway — src/api/webhook.py)
+        │
+        ├── Parse: subject, body, from_address
+        │
+        ├── Classify: HuggingFace pipeline(text[:512])
+        │       Returns: label + confidence score
+        │
+        ├── Lookup routing: PostgreSQL → routing_settings table
+        │       WHERE label = predicted_label
+        │       Returns: destination_email
+        │
+        ├── Routing decision:
+        │   If confidence >= 0.85 AND destination_email configured:
+        │       status = "auto_routed"
+        │       Resend SDK → send forwarded email to destination
+        │   Else:
+        │       status = "pending_review"
+        │
+        └── INSERT INTO tickets (PostgreSQL)
+                → Instantly visible in Streamlit queue
+```
+
+### 4.2 — Multi-Service Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    STREAMLIT CLOUD                           │
+│                                                             │
+│  streamlit_app.py                                           │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │ Test         │  │ Human Queue  │  │ Settings         │  │
+│  │ Classifier   │  │ (validate    │  │ (routing email   │  │
+│  │              │  │  all tickets)│  │  per category)   │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+│         │                 │                   │              │
+└─────────┼─────────────────┼───────────────────┼─────────────┘
+          │                 │                   │
+          └─────────────────┼───────────────────┘
+                            │ PostgreSQL (SSL)
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      RAILWAY                                 │
+│                                                             │
+│  ┌──────────────────────┐    ┌──────────────────────────┐  │
+│  │  Webhook API         │    │  PostgreSQL Database      │  │
+│  │  (FastAPI/Uvicorn)   │◄──►│                          │  │
+│  │                      │    │  tables:                 │  │
+│  │  POST /webhook/resend│    │  - tickets               │  │
+│  │                      │    │  - routing_settings      │  │
+│  └──────────────────────┘    └──────────────────────────┘  │
+│           ▲ (internal network, no SSL)                       │
+└───────────┼─────────────────────────────────────────────────┘
+            │
+            │ Resend Webhook
+┌───────────┼─────────────────────────────────────────────────┐
+│  RESEND   │                                                  │
+│           │                                                  │
+│  Inbound email received at neurodynamics.tech               │
+│  MX: inbound-smtp.eu-west-1.amazonaws.com                   │
+│  Fires POST to Railway webhook URL                          │
+└─────────────────────────────────────────────────────────────┘
+            │
+            │ GitHub API (feedback events)
+┌───────────▼─────────────────────────────────────────────────┐
+│  GITHUB + GITHUB ACTIONS                                     │
+│                                                             │
+│  data/feedback/YYYY/MM/DD/fb_<uuid>.json                    │
+│  → triggers retrain.yml workflow                            │
+│  → trains DistilBERT on corrections                         │
+│  → pushes new model to Hugging Face Hub                     │
+└─────────────────────────────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  HUGGING FACE HUB                                            │
+│                                                             │
+│  ouel/bert-ticket-classifier                                │
+│  ├── model.safetensors  (268 MB — DistilBERT weights)       │
+│  ├── config.json        (num_labels=5, id2label mapping)    │
+│  ├── tokenizer.json     (WordPiece vocab, 30522 tokens)     │
+│  └── model_pointers.json (active version tag)               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 05 — Classification Categories
+
+| Label | Description | Threshold | Example |
+|---|---|---|---|
+| `account_access` | Login failures, locked accounts, password resets | `>= 0.85` | *"I can't log in, my account is locked"* |
+| `billing` | Charges, invoices, subscription issues | `>= 0.85` | *"I was charged twice this month"* |
+| `bug_report` | Software crashes, errors, unexpected behavior | `>= 0.85` | *"The app crashes when I click submit"* |
+| `refund_request` | Refund demands, cancellations, chargebacks | `>= 0.85` | *"I want my money back immediately"* |
+| `shipping_delivery` | Delivery status, lost packages, delays | `>= 0.85` | *"My order hasn't arrived after 2 weeks"* |
+
+> **Pending Review:** Any prediction with confidence below `0.85` is queued for human review instead of being auto-routed. Every human correction generates a labeled training event.
+
+---
+
+## 06 — Technology Stack
+
+| Layer | Tool | Role |
+|---|---|---|
+| **Transformer Model** | `distilbert-base-uncased` (HuggingFace) | Core NLP classifier — 6-layer, 66M param BERT distillation |
+| **Training Framework** | HuggingFace `Trainer` + `datasets` | Fine-tuning loop, evaluation, checkpointing |
+| **Model Registry** | Hugging Face Hub | Version-controlled model storage (`model_pointers.json`) |
+| **Baseline Model** | scikit-learn TF-IDF + Logistic Regression | Fast fallback when HF model unavailable |
+| **Webhook API** | FastAPI + Uvicorn | Receives Resend emails, classifies, forwards, inserts to DB |
+| **Dashboard** | Streamlit Cloud | Human validation queue, routing settings, CLP status |
+| **Database** | PostgreSQL (Railway) | Shared tickets + routing_settings tables |
+| **Email Automation** | Resend (inbound + outbound) | Receives raw emails, forwards classified emails |
+| **CI/CD + CLP** | GitHub Actions (`retrain.yml`) | Auto-retrains DistilBERT on human corrections |
+| **Feedback Store** | GitHub repository (`data/feedback/`) | Immutable JSON event log for CLP training data |
+| **Experiment Tracking** | MLflow | Metrics logging per training run |
+| **Data Versioning** | DVC | Reproducible pipeline and dataset snapshots |
+| **Containerization** | Docker | Local development and testing |
+
+---
+
+## 07 — Project Structure
 
 ```
 email-ticket-classifier/
-├── .dvc/                       # DVC config and remote settings
-├── data/                       # versioned by DVC, never committed raw
-│   ├── raw/kaggle/             # Kaggle database labeled emails
-│   ├── raw/enron/              # Enron email corpus
-│   └── processed/              # cleaned, split, tokenized
+│
 ├── src/
-│   ├── data/
-│   │   ├── ingest_kaggle.py        # Kaggle dataset downloader
-│   │   ├── ingest_enron.py         # download + parse Enron
-│   │   └── preprocess.py           # clean, tokenize, split
-│   ├── features/
-│   │   └── build_features.py       # TF-IDF, embeddings, DVC stage
-│   ├── training/
-│   │   ├── train_baseline.py       # TF-IDF + LR, stage 1
-│   │   ├── train_bert.py           # DistilBERT fine-tune, stage 2
-│   │   ├── hpo.py                  # Optuna HPO search
-│   │   └── evaluate.py             # F1, precision, recall, CM
-│   ├── serving/
-│   │   ├── app.py                  # FastAPI app (predict + inbound)
-│   │   ├── model_loader.py         # load champion from MLflow registry
-│   │   └── schemas.py              # Pydantic request/response models
-│   └── monitoring/
-│       ├── drift_detector.py       # Evidently AI drift reports
-│       └── metrics_exporter.py     # Prometheus metrics
-├── tests/
-│   ├── test_preprocess.py
-│   ├── test_features.py
-│   ├── test_model_quality.py       # F1 quality gate (threshold 0.85)
-│   └── test_api.py                 # FastAPI endpoint tests
+│   ├── api/
+│   │   └── webhook.py          # FastAPI: Resend inbound → classify → forward → DB
+│   ├── db/
+│   │   ├── database.py         # SQLAlchemy engine (PostgreSQL or SQLite fallback)
+│   │   └── models.py           # Ticket + RoutingSettings ORM models
+│   ├── pipeline/
+│   │   └── train_clp.py        # Continuous Learning Pipeline (CLP)
+│   └── serving/
+│       ├── model_loader.py     # Load DistilBERT from HuggingFace Hub
+│       └── predict.py          # Inference wrapper
+│
+├── data/
+│   └── feedback/               # CLP training events (JSON, committed to Git)
+│       └── YYYY/MM/DD/
+│           └── fb_<uuid>.json  # {text, label, corrected_label, confidence}
+│
 ├── .github/workflows/
-│   ├── ci.yml                  # lint, test, quality gate on PR
-│   └── cd.yml                  # build Docker, push, deploy on merge
-├── docker/
-│   ├── Dockerfile
-│   └── docker-compose.yml      # app + MLflow + Prometheus
-├── dvc.yaml                    # pipeline DAG definition
-├── params.yaml                 # all hyperparameters (single source of truth)
-├── pyproject.toml              # deps, ruff, mypy, pytest config
-└── Makefile                    # make train / test / serve / retrain
+│   └── retrain.yml             # GitHub Actions CLP: triggered by repository_dispatch
+│
+├── streamlit_app.py            # Dashboard: Test / Queue / History / Settings tabs
+├── main.py                     # Railway entry point: uvicorn src.api.webhook:app
+├── Procfile                    # Heroku/Render: web: uvicorn ...
+├── railway.json                # Railway Nixpacks builder config
+├── params.yaml                 # All hyperparameters (single source of truth)
+├── requirements.txt            # Runtime dependencies (pip)
+└── pyproject.toml              # Package metadata + optional dev deps
 ```
-
-**Key conventions:**
-
-- `params.yaml` is the single source of truth for every hyperparameter — no magic numbers in code
-- `dvc.yaml` defines the full pipeline DAG — `dvc repro` reruns only what changed
-- `data/` is never committed to git — only `.dvc` pointer files are tracked
-- The `tests/test_model_quality.py` quality gate runs in CI on every pull request
 
 ---
 
-## 07 — MLOps Feedback Loop
-
-The system is designed as a closed loop. Production predictions that are corrected by human agents automatically become training data. Evidently AI monitors the incoming email distribution for drift. When drift or performance degradation is detected, a retraining job is scheduled via Celery, the model is evaluated against the quality gate, and — if it passes — promoted to production without manual intervention.
-
-### Continuous improvement cycle
+## 08 — MLOps Feedback Loop
 
 ```
-Production predictions
-        |
-        v
-Human review queue  (agents re-label low-confidence predictions)
-        |
-        v
-Training store      (corrections written back automatically)
-        |
-        v
-Drift trigger       (Evidently AI detects distribution shift)
-        |
-        v
-Retrain job         (Celery schedules DVC repro run)
-        |
-        v
-Quality gate        (F1 >= 0.85 required to proceed)
-        |
-        v
-Promote to production  (new champion replaces old in MLflow registry)
-        |
-        +---> back to Production predictions  (loop continues)
+Customer Email Arrives
+        │
+        ▼
+Resend → Railway Webhook
+        │  classify in < 500ms
+        ▼
+High confidence? ──YES──► Forward to department email (Resend SDK)
+        │                  Status: auto_routed
+        │ NO
+        ▼
+Queue for review
+Status: pending_review
+        │
+        ▼
+Human opens Streamlit Queue
+        │  sees ALL tickets (auto-routed + pending)
+        ▼
+Human validates label
+        │  "Validate & Resolve" button
+        ▼
+save_feedback() → push fb_<uuid>.json to GitHub
+        │
+        ▼
+GitHub Actions detects new feedback file
+        │  repository_dispatch("retrain")
+        ▼
+MIN_BATCH_SIZE gate (default: 10 corrections)
+        │
+        ▼
+train_clp.py downloads current model from HF Hub
+        │  continues training from existing weights
+        ▼
+Fine-tune on all new corrections
+        │
+        ▼
+Evaluate F1 on held-out split
+        │
+        ▼
+F1 >= threshold? ──YES──► Push new model to HF Hub
+        │                  Update model_pointers.json
+        │                  Streamlit loads new version (TTL 5min)
+        │ NO
+        ▼
+Model not promoted (current champion stays)
 ```
 
-### What this means in practice
-
-The model that serves predictions in month three will be meaningfully better than the one deployed at launch — without any manual intervention beyond reviewing low-confidence tickets, which support agents already do as part of their normal workflow. Every human correction is an unlabeled training example being labeled for free.
+> Every human validation is a **free labeled training example**. The model that serves in month 3 will be substantially more accurate than the one deployed at launch — without any manual ML engineering effort.
 
 ---
 
-## 08 — CI/CD Pipeline
+## 09 — CI/CD Pipeline (GitHub Actions)
 
-Every pull request triggers the CI workflow. Every merge to `main` triggers the CD workflow.
+### `retrain.yml` — Continuous Learning Workflow
 
-### CI workflow (`ci.yml`)
+Triggered by: `repository_dispatch` (event type: `retrain`) OR `workflow_dispatch` (manual)
 
-1. Install dependencies from `pyproject.toml`
-2. Run `ruff` linting and `mypy` type checking
-3. Run `pytest tests/` — unit and integration tests
-4. Run `test_model_quality.py` — F1 quality gate against held-out test set
-5. Fail the PR if any step fails — no merging below threshold
+```yaml
+Steps:
+  1. Checkout repository
+  2. Set up Python 3.11
+  3. Install dependencies (requirements.txt)
+  4. Run: python src/pipeline/train_clp.py
+        ├── Scan data/feedback/ for unprocessed events
+        ├── Gate: MIN_BATCH_SIZE check
+        ├── Load DistilBERT from HF Hub
+        ├── Fine-tune on feedback data
+        ├── Evaluate F1
+        └── Push to HF Hub if quality gate passes
+  5. Commit processed_ids.json back to repo
+```
 
-### CD workflow (`cd.yml`)
+### Quality Gate
 
-1. Build Docker image from `docker/Dockerfile`
-2. Push image to container registry (GCP Artifact Registry or AWS ECR)
-3. Deploy to cloud run / ECS using updated image tag
-4. Run smoke test against live `/health` and `/classify` endpoints
-5. Roll back automatically if smoke test fails
+| Metric | Threshold | Action if below |
+|---|---|---|
+| Weighted F1 | Configurable in `params.yaml` | Model not promoted — current champion stays |
+| Eval Accuracy | Logged to MLflow | Informational only |
 
 ---
 
-*Email Ticket Classifier — MLOps Project Specification*
-*Two-stage NLP + Production MLOps Pipeline*
+## 10 — Database Schema
+
+### `tickets` table
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | Auto-increment ticket ID |
+| `subject` | STRING | Email subject line |
+| `body` | STRING | Email body text |
+| `predicted_label` | STRING | Model's predicted category |
+| `confidence` | FLOAT | Softmax probability (0.0–1.0) |
+| `human_label` | STRING | Human-corrected label (nullable) |
+| `status` | STRING | `pending_review` / `auto_routed` / `resolved` |
+| `response_email` | STRING | (legacy, nullable) |
+| `created_at` | DATETIME | UTC timestamp |
+
+### `routing_settings` table
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | Auto-increment |
+| `label` | STRING UNIQUE | Ticket category (e.g. `billing`) |
+| `destination_email` | STRING | Where to forward this category |
+| `updated_at` | DATETIME | Last modified timestamp |
+
+---
+
+*Email Ticket Classifier — Production MLOps Documentation*
+*DistilBERT Transformer + Continuous Learning Pipeline + Resend Automation*
+*Built: June 2026*
