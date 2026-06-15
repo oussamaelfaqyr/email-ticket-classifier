@@ -12,6 +12,10 @@ import datetime
 # Ensure repo root is importable when run from repo root by Streamlit Cloud
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Inject Streamlit secrets into environment before importing DB
+if "DATABASE_URL" in st.secrets:
+    os.environ["DATABASE_URL"] = st.secrets["DATABASE_URL"]
+
 from src.db.database import SessionLocal, engine, Base
 from src.db.models import Ticket
 
