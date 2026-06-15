@@ -34,10 +34,13 @@ jobs:
           python src/pipeline/train_clp.py
           
       - name: Commit and Push Manifests & Quarantine
-        if: success() || failure()
+        if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/manifests/ data/quarantine/
-          # Only commit if there are changes
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update CLP state (manifests/quarantine)" && git push)
+          # Ensure directories always exist before git add (avoids 'pathspec did not match' fatal)
+          mkdir -p data/manifests data/quarantine data/feedback
+          touch data/manifests/.gitkeep data/quarantine/.gitkeep data/feedback/.gitkeep
+          git add data/manifests/ data/quarantine/ data/feedback/ || true
+          # Only commit + push if there is actually something staged
+          git diff --staged --quiet || git commit -m "chore: Update CLP state [manifests/quarantine] [skip ci]" && git push || true
