@@ -57,13 +57,12 @@ def load_classifier():
         try:
             from src.serving.model_loader import get_inference_pipeline
             pipe = get_inference_pipeline(hf_repo_id)
-            # Return a unified (label, confidence) callable
             def hf_predict(text):
                 res = pipe(text)
                 if isinstance(res, list) and res:
                     return res[0]["label"], float(res[0]["score"])
                 return "unknown", 0.0
-            return hf_predict, None   # (predict_fn, label_list)
+            return hf_predict, None
         except Exception as e:
             st.warning(f"HF model unavailable ({e}). Using baseline sklearn model.")
 
@@ -86,9 +85,7 @@ def load_classifier():
 
 predict_fn, _label_list = load_classifier()
 
-# Derive label list (for dropdowns). Works for both HF and sklearn.
 LABEL_OPTIONS = _label_list or [
-    # Real classes from models/baseline.pkl — keep in sync with training data
     "account_access", "billing", "bug_report", "refund_request", "shipping_delivery"
 ]
 
@@ -106,7 +103,6 @@ def _push_file_to_github(filepath: str, content: str):
     token = st.secrets.get("GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
     repo  = st.secrets.get("GITHUB_REPO")  or os.environ.get("GITHUB_REPO",  "OWNER/REPO")
     if not token or repo == "OWNER/REPO":
-        # Local-testing fallback: write directly
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, "w") as f:
             f.write(content)
@@ -145,10 +141,10 @@ def _trigger_github_dispatch():
         except Exception:
             time.sleep(2)
 
-def save_feedback(ticket: Ticket, human_label: str, response_email: str = ""):
+def save_feedback(ticket: Ticket, human_label: str):
     """
     1. Persist corrected label as an immutable CLP event (GitHub API).
-    2. Update the local SQLite ticket to 'resolved'.
+    2. Update the shared DB ticket to 'resolved'.
     3. Trigger GitHub Actions retraining dispatch.
     """
     feedback_id  = str(uuid.uuid4())
@@ -163,26 +159,23 @@ def save_feedback(ticket: Ticket, human_label: str, response_email: str = ""):
         "timestamp":       now.isoformat() + "Z",
     }
 
-    # Partitioned path: data/feedback/YYYY/MM/DD/fb_<uuid>.json
     filepath = f"data/feedback/{now.strftime('%Y/%m/%d')}/fb_{feedback_id}.json"
     _push_file_to_github(filepath, json.dumps(feedback_obj, indent=2))
     _trigger_github_dispatch()
 
-    # Update SQLite record
     db = get_db()
     try:
         t = db.query(Ticket).filter(Ticket.id == ticket.id).first()
         if t:
-            t.human_label    = human_label
-            t.response_email = response_email
-            t.status         = "resolved"
+            t.human_label = human_label
+            t.status      = "resolved"
             db.commit()
     finally:
         db.close()
 
 
 # ── Training Status helpers ────────────────────────────────────────────────────
-@st.cache_data(ttl=30)   # refresh every 30 s automatically
+@st.cache_data(ttl=30)
 def get_latest_workflow_run():
     """Query GitHub Actions API for the latest CLP workflow run."""
     token = st.secrets.get("GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
@@ -200,7 +193,7 @@ def get_latest_workflow_run():
         pass
     return None
 
-@st.cache_data(ttl=300)  # refresh every 5 min
+@st.cache_data(ttl=300)
 def get_current_model_version():
     """Fetch model_pointers.json from HF Hub to get the active model version."""
     hf_repo_id = st.secrets.get("HF_REPO_ID") or os.environ.get("HF_REPO_ID", "")
@@ -215,24 +208,12 @@ def get_current_model_version():
     except Exception:
         return None, None
 
-def count_feedback_files():
-    """Count total feedback events committed to the repo."""
-    return len([f for f in glob.glob("data/feedback/**/*.json", recursive=True)
-                if not f.endswith(".gitkeep")])
-
-try:
-    import glob as _glob_mod
-    import glob
-except ImportError:
-    pass
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR — CLP Status Panel
 # ═══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.header("🤖 CLP Status")
 
-    # — Model version —
     active_ver, stable_ver = get_current_model_version()
     if active_ver:
         st.markdown(f"**Active model:** `{active_ver}`")
@@ -243,16 +224,15 @@ with st.sidebar:
 
     st.divider()
 
-    # — GitHub Actions latest run —
     run = get_latest_workflow_run()
     if run:
-        status     = run.get("status", "unknown")      # queued / in_progress / completed
-        conclusion = run.get("conclusion") or ""        # success / failure / cancelled / None
+        status     = run.get("status", "unknown")
+        conclusion = run.get("conclusion") or ""
         run_number = run.get("run_number", "?")
         updated_at = run.get("updated_at", "")[:16].replace("T", " ")
         html_url   = run.get("html_url", "#")
 
-        if status == "in_progress" or status == "queued":
+        if status in ("in_progress", "queued"):
             st.markdown("### 🟡 Training in progress…")
             st.caption(f"Run #{run_number} · started {updated_at} UTC")
             st.info("A new model is being trained. The page will refresh automatically.", icon="⏳")
@@ -279,28 +259,23 @@ with st.sidebar:
 
     st.divider()
 
-    # — Feedback stats —
     try:
         import glob
         n_feedback = len([f for f in glob.glob("data/feedback/**/*.json", recursive=True)
                           if not f.endswith(".gitkeep")])
         st.metric("Feedback events", n_feedback, help="Immutable events stored in data/feedback/")
-        st.caption(f"Need 50 to retrain (or trigger manually with min_batch_size=1)")
+        st.caption("Need 50 to retrain (or trigger manually with min_batch_size=1)")
     except Exception:
         pass
 
     st.divider()
 
-    # — Manual refresh button —
     if st.button("🔄 Refresh model & status", use_container_width=True):
         get_latest_workflow_run.clear()
         get_current_model_version.clear()
         load_classifier.clear()
         st.rerun()
 
-    # — Non-blocking auto-refresh while training —
-    # Uses an invisible HTML meta-refresh so the browser reloads itself
-    # without freezing the Python/Streamlit process at all.
     if run and run.get("status") in ("in_progress", "queued"):
         st.caption("⏱️ Page auto-refreshes every 30 s while training…")
         st.markdown(
@@ -334,7 +309,6 @@ with tab1:
                 label, confidence = predict_fn(text_input)
                 routing           = determine_routing(label, confidence)
 
-                # Persist to DB
                 status = (
                     "auto_routed" if confidence >= HIGH_THRESHOLD
                     else "pending_review"
@@ -366,8 +340,8 @@ with tab1:
 
 # ── Tab 2 — Human Review Queue ─────────────────────────────────────────────────
 with tab2:
-    st.header("Pending Review Queue")
-    st.write("Tickets with low confidence that require a human decision.")
+    st.header("Human Review Queue")
+    st.write("All incoming tickets — validate or correct the predicted label to train the next model.")
 
     db = get_db()
     try:
@@ -408,16 +382,13 @@ with tab2:
                     "Correct Label", options=LABEL_OPTIONS, index=default_idx,
                     help="Select the correct category. This trains the next model version.",
                 )
-                
                 if st.form_submit_button(
                     "Validate & Resolve",
                     type="primary",
                     icon=":material/done_all:",
                 ):
                     save_feedback(t, new_label)
-                    st.success(
-                        "✅ Resolved! Label saved — model retraining triggered in background.",
-                    )
+                    st.success("✅ Resolved! Label saved — model retraining triggered in background.")
                     time.sleep(1)
                     st.rerun()
 
@@ -445,47 +416,57 @@ with tab3:
         st.write(f"**{len(resolved)}** total resolved tickets.")
 
     for t in resolved:
-        status_icon = "✅" if t.status == "resolved" else "⚡"
         with st.container(border=True):
             col1, col2, col3 = st.columns([4, 2, 2])
             with col1:
                 st.write(f"**Ticket #{t.id}:** {t.subject}")
-                if t.response_email:
-                    st.write(f"> {t.response_email}")
             with col2:
                 st.write(f"**Predicted:** `{t.predicted_label}`")
                 if t.human_label:
                     st.write(f"**Corrected:** `{t.human_label}`")
             with col3:
-                st.write(f"{status_icon} `{t.status}`")
+                st.write(f"✅ `{t.status}`")
                 if t.created_at:
                     st.caption(t.created_at.strftime("%Y-%m-%d %H:%M"))
 
 # ── Tab 4 — Settings ───────────────────────────────────────────────────────────
 with tab4:
     st.header("Routing Settings")
-    st.write("Map each ticket category to the destination email address.")
-    
-    settings_file = "configs/routing.json"
-    os.makedirs(os.path.dirname(settings_file), exist_ok=True)
-    
-    # Load existing settings
-    if os.path.exists(settings_file):
-        with open(settings_file, "r") as f:
-            routing_settings = json.load(f)
-    else:
-        routing_settings = {label: "" for label in LABEL_OPTIONS}
-        
+    st.write("Map each ticket category to the destination email address. Saved to the shared database so Railway forwards emails correctly.")
+
+    from src.db.models import RoutingSettings
+
+    db = get_db()
+    try:
+        existing = db.query(RoutingSettings).all()
+        routing_settings = {r.label: r.destination_email or "" for r in existing}
+    except Exception as e:
+        routing_settings = {}
+        st.error(f"Could not load settings: {e}")
+    finally:
+        db.close()
+
     with st.form("settings_form"):
         new_settings = {}
         for label in LABEL_OPTIONS:
             new_settings[label] = st.text_input(
-                f"Email for '{label}'", 
+                f"📧 Email for '{label}'",
                 value=routing_settings.get(label, ""),
                 placeholder=f"e.g. {label.replace('_', '')}@yourcompany.com"
             )
-            
+
         if st.form_submit_button("Save Settings", type="primary", icon=":material/save:"):
-            with open(settings_file, "w") as f:
-                json.dump(new_settings, f, indent=2)
-            st.success("Routing settings saved successfully!")
+            db = get_db()
+            try:
+                for label, email in new_settings.items():
+                    row = db.query(RoutingSettings).filter(RoutingSettings.label == label).first()
+                    if row:
+                        row.destination_email = email
+                    else:
+                        db.add(RoutingSettings(label=label, destination_email=email))
+                db.commit()
+                st.success("✅ Routing settings saved! Railway will now forward emails to the correct addresses.")
+            except Exception as e:
+                st.error(f"Could not save settings: {e}")
+            finally:
+                db.close()

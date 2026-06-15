@@ -27,10 +27,15 @@ HIGH_THRESHOLD = 0.85
 
 def get_routing_address(label: str) -> str:
     try:
-        with open("configs/routing.json", "r") as f:
-            settings = json.load(f)
-            return settings.get(label, "")
-    except Exception:
+        from src.db.database import SessionLocal, Base, engine
+        from src.db.models import RoutingSettings
+        Base.metadata.create_all(bind=engine)
+        db = SessionLocal()
+        row = db.query(RoutingSettings).filter(RoutingSettings.label == label).first()
+        db.close()
+        return row.destination_email if row and row.destination_email else ""
+    except Exception as e:
+        print(f"Could not read routing settings: {e}")
         return ""
 
 @app.post("/webhook/resend")
