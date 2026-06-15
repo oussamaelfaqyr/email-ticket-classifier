@@ -298,12 +298,15 @@ with st.sidebar:
         load_classifier.clear()
         st.rerun()
 
-    # — Auto-refresh while training —
-    if run and (run.get("status") in ("in_progress", "queued")):
-        st.caption("Auto-refreshing every 30 s while training…")
-        time.sleep(30)
-        get_latest_workflow_run.clear()
-        st.rerun()
+    # — Non-blocking auto-refresh while training —
+    # Uses an invisible HTML meta-refresh so the browser reloads itself
+    # without freezing the Python/Streamlit process at all.
+    if run and run.get("status") in ("in_progress", "queued"):
+        st.caption("⏱️ Page auto-refreshes every 30 s while training…")
+        st.markdown(
+            '<meta http-equiv="refresh" content="30">',
+            unsafe_allow_html=True,
+        )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN UI
