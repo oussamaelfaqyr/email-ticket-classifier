@@ -15,11 +15,11 @@ if DATABASE_URL:
     if "+pg8000" not in DATABASE_URL:
         DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+pg8000://", 1)
 
-    # Cloud database connection (PostgreSQL) with SSL required by Railway
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"ssl_context": True}
-    )
+    # Only use SSL for external/public connections (not Railway internal)
+    is_internal = "railway.internal" in DATABASE_URL
+    connect_args = {} if is_internal else {"ssl_context": True}
+
+    engine = create_engine(DATABASE_URL, connect_args=connect_args)
 else:
     # Local fallback (SQLite)
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
