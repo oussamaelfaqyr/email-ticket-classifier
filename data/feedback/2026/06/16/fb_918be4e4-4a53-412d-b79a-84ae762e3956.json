@@ -1,0 +1,9 @@
+{
+  "id": "918be4e4-4a53-412d-b79a-84ae762e3956",
+  "ticket_db_id": 9,
+  "text": "Account suspended without notice My account appears to have been suspended unexpectedly. I can no longer log in, password reset emails are not arriving, and I have an active subscription. Please investigate and restore access as soon as possible.",
+  "label": "account_access",
+  "corrected_label": "account_access",
+  "confidence": 0.9639217257499695,
+  "timestamp": "2026-06-16T11:05:53.267840Z"
+}
