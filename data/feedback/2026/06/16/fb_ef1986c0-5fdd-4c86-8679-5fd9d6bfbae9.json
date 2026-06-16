@@ -1,0 +1,9 @@
+{
+  "id": "ef1986c0-5fdd-4c86-8679-5fd9d6bfbae9",
+  "ticket_db_id": 14,
+  "text": "Billing discrepancy on my account Hello Support Team,\nI noticed an unexpected charge on my account. The amount billed does not match my subscription plan.\nCould you please review my recent transactions and clarify this issue?\n\nBest regards.",
+  "label": "billing",
+  "corrected_label": "billing",
+  "confidence": 0.5876565906588296,
+  "timestamp": "2026-06-16T13:21:05.478719Z"
+}
