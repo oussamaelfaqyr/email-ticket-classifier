@@ -1,0 +1,9 @@
+{
+  "id": "ddcbe8dd-273a-463f-bc01-82175e364fad",
+  "ticket_db_id": 6,
+  "text": "Charged twice for monthly subscription I was billed twice for my monthly plan on June 14. My bank statement shows two separate charges. Please refund the duplicate payment.",
+  "label": "refund_request",
+  "corrected_label": "refund_request",
+  "confidence": 0.8466447591781616,
+  "timestamp": "2026-06-16T09:56:32.871431Z"
+}
