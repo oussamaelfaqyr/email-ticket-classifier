@@ -8,6 +8,7 @@ import base64
 import requests
 import yaml
 import datetime
+import resend
 
 # Ensure repo root is importable when run from repo root by Streamlit Cloud
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -148,8 +149,9 @@ def _trigger_github_dispatch():
 def save_feedback(ticket: Ticket, human_label: str):
     """
     1. Persist corrected label as an immutable CLP event (GitHub API).
-    2. Update the shared DB ticket to 'resolved'.
-    3. Trigger GitHub Actions retraining dispatch.
+    2. Forward the email to the correct department (if routing exists).
+    3. Update the shared DB ticket to 'resolved'.
+    4. Trigger GitHub Actions retraining dispatch.
     """
     feedback_id  = str(uuid.uuid4())
     now          = datetime.datetime.utcnow()
@@ -169,6 +171,22 @@ def save_feedback(ticket: Ticket, human_label: str):
 
     db = get_db()
     try:
+        from src.db.models import RoutingSettings
+        # Try to forward the email
+        resend.api_key = st.secrets.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
+        if resend.api_key:
+            row = db.query(RoutingSettings).filter(RoutingSettings.label == human_label).first()
+            if row and row.destination_email:
+                try:
+                    resend.Emails.send({
+                        "from": "support@neurodynamics.tech",
+                        "to": row.destination_email,
+                        "subject": f"[{human_label.upper()}] FW: {ticket.subject}",
+                        "text": f"Original Sender: Unknown\nConfidence: {ticket.confidence:.0%} (Manually verified)\n\n{ticket.body}"
+                    })
+                except Exception as e:
+                    print(f"Failed to forward via Resend in UI: {e}")
+
         t = db.query(Ticket).filter(Ticket.id == ticket.id).first()
         if t:
             t.human_label = human_label
