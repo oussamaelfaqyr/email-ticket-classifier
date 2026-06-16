@@ -61,18 +61,18 @@ async def receive_email(request: Request):
     # fetch the full email content from the Resend API using the email_id
     if not text_body and not html_body and email_id and resend.api_key:
         try:
-            import requests as req
-            r = req.get(
-                f"https://api.resend.com/emails/{email_id}",
-                headers={"Authorization": f"Bearer {resend.api_key}"},
-                timeout=5
-            )
-            if r.status_code == 200:
-                fetched = r.json()
+            fetched = resend.Emails.get(email_id)
+            if isinstance(fetched, dict):
                 text_body = fetched.get("text", "") or ""
                 html_body = fetched.get("html", "") or ""
+            else:
+                # Some SDK versions return an object
+                text_body = getattr(fetched, "text", "") or ""
+                html_body = getattr(fetched, "html", "") or ""
+                
+            print(f"Fetched body for {email_id}. Text length: {len(text_body)}, HTML length: {len(html_body)}")
         except Exception as e:
-            print(f"Could not fetch email body from Resend API: {e}")
+            print(f"Could not fetch email body from Resend API for {email_id}: {e}")
 
     # Fallback to HTML if text is still missing
     if not text_body and html_body:
@@ -97,11 +97,12 @@ async def receive_email(request: Request):
         # Actually forward the email
         if resend.api_key:
             try:
+                final_body = text_body if text_body else "[No body content provided by original sender]"
                 resend.Emails.send({
                     "from": "support@neurodynamics.tech",
                     "to": target_email,
                     "subject": f"[{label.upper()}] FW: {subject}",
-                    "text": f"Original Sender: {from_address}\nConfidence: {confidence:.0%}\n\n{text_body}"
+                    "text": f"Original Sender: {from_address}\nConfidence: {confidence:.0%}\n\n{final_body}"
                 })
             except Exception as e:
                 print(f"Failed to forward email via Resend: {e}")
