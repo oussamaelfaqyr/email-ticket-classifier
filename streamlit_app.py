@@ -62,11 +62,17 @@ def load_classifier():
         try:
             from src.serving.model_loader import get_inference_pipeline
             pipe = get_inference_pipeline(hf_repo_id)
+            
             def hf_predict(text):
                 res = pipe(text)
                 if isinstance(res, list) and res:
                     return res[0]["label"], float(res[0]["score"])
                 return "unknown", 0.0
+            
+            # If the pipeline returns the exact dummy response, it failed to load
+            if hf_predict("test check")[0] == "unknown":
+                raise Exception("HF pipeline failed to load (returned dummy fallback)")
+
             return hf_predict, None
         except Exception as e:
             st.warning(f"HF model unavailable ({e}). Using baseline sklearn model.")
