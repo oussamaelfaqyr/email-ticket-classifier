@@ -61,7 +61,7 @@ async def receive_email(request: Request):
     # fetch the full email content from the Resend API using the email_id
     if not text_body and not html_body and email_id and resend.api_key:
         try:
-            fetched = resend.Emails.get(email_id)
+            fetched = resend.Emails.Receiving.get(email_id)
             if isinstance(fetched, dict):
                 text_body = fetched.get("text", "") or ""
                 html_body = fetched.get("html", "") or ""
