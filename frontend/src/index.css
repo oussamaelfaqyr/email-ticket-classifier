@@ -47,7 +47,7 @@
   padding: 0;
 }
 
-html {
+html, body, #root {
   height: 100%;
 }
 
@@ -55,24 +55,14 @@ body {
   font-family: var(--font-family);
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  height: 100%;
-  overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-#root {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
 }
 
 /* Layout */
 .app-container {
   display: flex;
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
+  min-height: 100vh;
 }
 
 /* Sidebar Styling */
@@ -85,7 +75,9 @@ body {
   padding: 24px 16px;
   flex-shrink: 0;
   z-index: 10;
-  height: 100%;
+  position: sticky;
+  top: 0;
+  height: 100vh;
   overflow-y: auto;
 }
 
@@ -205,11 +197,10 @@ body {
 
 /* Main Content Area */
 .main-content {
-  flex-grow: 1;
-  flex-shrink: 1;
-  min-height: 0;          /* KEY FIX: allows flex child to shrink and scroll */
+  flex: 1;
   padding: 40px;
   overflow-y: auto;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   gap: 32px;
@@ -520,26 +511,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-height: 65vh;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.tickets-list::-webkit-scrollbar {
-  width: 4px;
-}
-
-.tickets-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.tickets-list::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
-  border-radius: 4px;
-}
-
-.tickets-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.6);
 }
 
 .ticket-item {
