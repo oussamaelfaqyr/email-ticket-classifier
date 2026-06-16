@@ -51,15 +51,22 @@ async def receive_email(request: Request):
     if not email_data:
         raise HTTPException(status_code=400, detail="Invalid payload")
         
-    subject = email_data.get("subject", "No Subject")
+    subject = email_data.get("subject", "")
     text_body = email_data.get("text", "")
+    html_body = email_data.get("html", "")
     from_address = email_data.get("from", "Unknown")
     
-    if not text_body:
-        return {"status": "ignored", "reason": "No text body"}
+    # Fallback to HTML if text is missing
+    if not text_body and html_body:
+        import re
+        text_body = re.sub('<[^<]+>', ' ', html_body)
+        
+    text_input = f"{subject} {text_body}".strip()
+    
+    if not text_input:
+        return {"status": "ignored", "reason": "Email is completely empty (no subject, no body)"}
         
     # Classify
-    text_input = f"{subject} {text_body}".strip()
     result = pipeline(text_input[:512])[0]
     label = result["label"]
     confidence = result["score"]
