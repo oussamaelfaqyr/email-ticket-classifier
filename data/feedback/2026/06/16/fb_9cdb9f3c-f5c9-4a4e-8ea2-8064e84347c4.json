@@ -1,0 +1,9 @@
+{
+  "id": "9cdb9f3c-f5c9-4a4e-8ea2-8064e84347c4",
+  "ticket_db_id": 18,
+  "text": "Request for refund [DEBUG - RESEND API ERROR]: Email not found",
+  "label": "account_access",
+  "corrected_label": "refund_request",
+  "confidence": 0.7295046448707581,
+  "timestamp": "2026-06-16T13:31:29.881846Z"
+}
