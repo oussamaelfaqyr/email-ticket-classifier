@@ -55,17 +55,35 @@ async def receive_email(request: Request):
     text_body = email_data.get("text", "")
     html_body = email_data.get("html", "")
     from_address = email_data.get("from", "Unknown")
-    
-    # Fallback to HTML if text is missing
+    email_id = email_data.get("email_id", "")
+
+    # If Resend didn't include body in the webhook (it only sends metadata),
+    # fetch the full email content from the Resend API using the email_id
+    if not text_body and not html_body and email_id and resend.api_key:
+        try:
+            import requests as req
+            r = req.get(
+                f"https://api.resend.com/emails/{email_id}",
+                headers={"Authorization": f"Bearer {resend.api_key}"},
+                timeout=5
+            )
+            if r.status_code == 200:
+                fetched = r.json()
+                text_body = fetched.get("text", "") or ""
+                html_body = fetched.get("html", "") or ""
+        except Exception as e:
+            print(f"Could not fetch email body from Resend API: {e}")
+
+    # Fallback to HTML if text is still missing
     if not text_body and html_body:
         import re
         text_body = re.sub('<[^<]+>', ' ', html_body)
-        
+
     text_input = f"{subject} {text_body}".strip()
-    
+
     if not text_input:
         return {"status": "ignored", "reason": "Email is completely empty (no subject, no body)"}
-        
+
     # Classify
     result = pipeline(text_input[:512])[0]
     label = result["label"]
