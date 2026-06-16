@@ -95,24 +95,21 @@ async def receive_email(request: Request):
     
     target_email = get_routing_address(label)
     
-    # Decide routing status
-    if confidence >= HIGH_THRESHOLD and target_email:
-        status = "auto_routed"
-        # Actually forward the email
-        if resend.api_key:
-            try:
-                final_body = text_body if text_body else "[No body content provided by original sender]"
-                resend.Emails.send({
-                    "from": "support@neurodynamics.tech",
-                    "to": target_email,
-                    "subject": f"[{label.upper()}] FW: {subject}",
-                    "text": f"Original Sender: {from_address}\nConfidence: {confidence:.0%}\n\n{final_body}"
-                })
-            except Exception as e:
-                print(f"Failed to forward email via Resend: {e}")
-                status = "pending_review" # Downgrade if sending fails
-    else:
-        status = "pending_review"
+    # ALWAYS forward the email to the predicted class (no matter the confidence)
+    if target_email and resend.api_key:
+        try:
+            final_body = text_body if text_body else "[No body content provided by original sender]"
+            resend.Emails.send({
+                "from": "support@neurodynamics.tech",
+                "to": target_email,
+                "subject": f"[{label.upper()}] FW: {subject}",
+                "text": f"Original Sender: {from_address}\nConfidence: {confidence:.0%}\n\n{final_body}"
+            })
+        except Exception as e:
+            print(f"Failed to forward email via Resend: {e}")
+            
+    # ALWAYS put the email in the Human Queue for dataset correction
+    status = "pending_review"
         
     # Save to SQLite so it appears in the Streamlit human queue
     db = next(get_db())

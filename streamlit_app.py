@@ -188,18 +188,20 @@ def save_feedback(ticket: Ticket, human_label: str):
         from src.db.models import RoutingSettings
         # Try to forward the email
         resend.api_key = st.secrets.get("RESEND_API_KEY") or os.environ.get("RESEND_API_KEY", "")
-        if resend.api_key:
-            row = db.query(RoutingSettings).filter(RoutingSettings.label == human_label).first()
-            if row and row.destination_email:
-                try:
-                    resend.Emails.send({
-                        "from": "support@neurodynamics.tech",
-                        "to": row.destination_email,
-                        "subject": f"[{human_label.upper()}] FW: {ticket.subject}",
-                        "text": f"Original Sender: Unknown\nConfidence: {ticket.confidence:.0%} (Manually verified)\n\n{ticket.body}"
-                    })
-                except Exception as e:
-                    print(f"Failed to forward via Resend in UI: {e}")
+        # If resolved directly in UI, forward ONLY if the class was corrected
+        if ticket.predicted_label != "unknown":
+            if human_label != ticket.predicted_label:
+                row = db.query(RoutingSettings).filter(RoutingSettings.label == human_label).first()
+                if row and row.destination_email:
+                    try:
+                        resend.Emails.send({
+                            "from": "support@neurodynamics.tech",
+                            "to": row.destination_email,
+                            "subject": f"[{human_label.upper()}] CORRECTION FW: {ticket.subject}",
+                            "text": f"Original Sender: Unknown\nStatus: Manually Corrected\n\n{ticket.body}"
+                        })
+                    except Exception as e:
+                        print(f"Failed to forward via Resend in UI: {e}")
 
         t = db.query(Ticket).filter(Ticket.id == ticket.id).first()
         if t:
