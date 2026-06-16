@@ -1,0 +1,9 @@
+{
+  "id": "39b57a91-3aba-47d5-b031-05e4b1935c18",
+  "ticket_db_id": 7,
+  "text": "Account access issue \u2013 cannot log in Hello Support Team,\nI am unable to access my account since this morning. Every time I try to log in, it says my password is incorrect even though I haven\u2019t changed it. I also tried resetting my password, but I am not receiving the reset email.\nCould you please help me regain access to my account as soon as possible?\nThank you.",
+  "label": "account_access",
+  "corrected_label": "account_access",
+  "confidence": 0.9593013525009155,
+  "timestamp": "2026-06-16T10:00:32.545740Z"
+}
