@@ -76,7 +76,9 @@ async def receive_email(request: Request):
             print(f"Fetched body for {email_id}. Text length: {len(text_body)}, HTML length: {len(html_body)}")
         except Exception as e:
             print(f"Could not fetch email body from Resend API for {email_id}: {e}")
-            text_body = f"[DEBUG - RESEND API ERROR]: {str(e)}"
+            
+        if not text_body and not html_body:
+            text_body = f"[DEBUG - RAW PAYLOAD]: {str(payload)}"
 
     # Fallback to HTML if text is still missing
     if not text_body and html_body:
