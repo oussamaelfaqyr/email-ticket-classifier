@@ -47,14 +47,24 @@
   padding: 0;
 }
 
+html {
+  height: 100%;
+}
+
 body {
   font-family: var(--font-family);
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Layout */
@@ -196,9 +206,10 @@ body {
 /* Main Content Area */
 .main-content {
   flex-grow: 1;
+  flex-shrink: 1;
+  min-height: 0;          /* KEY FIX: allows flex child to shrink and scroll */
   padding: 40px;
   overflow-y: auto;
-  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 32px;
