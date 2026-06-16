@@ -1,13 +1,15 @@
 import os
 import json
-from functools import lru_cache
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline as hf_pipeline
 
-# Module-level singleton — safe for both FastAPI and Streamlit contexts
+# All heavy ML imports are LAZY (inside functions) so this module
+# can always be imported safely without torch/transformers installed.
+
+# Module-level singleton cache — works in both FastAPI and Streamlit contexts
 _pipeline_cache = {}
 
+
 def get_model_pointers(repo_id: str):
-    """Fetch the model_pointers.json from HF Hub."""
+    """Fetch model_pointers.json from HF Hub."""
     try:
         from huggingface_hub import hf_hub_download
         filepath = hf_hub_download(repo_id=repo_id, filename="model_pointers.json")
@@ -17,27 +19,48 @@ def get_model_pointers(repo_id: str):
         print(f"Warning: Failed to fetch model_pointers.json: {e}")
         return None
 
+
 def load_hf_model(repo_id: str, revision: str):
-    """Load model and tokenizer from HF Hub (cached in module-level dict)."""
+    """Load model and tokenizer from HF Hub, cached by repo+revision."""
     cache_key = f"{repo_id}@{revision}"
     if cache_key in _pipeline_cache:
         return _pipeline_cache[cache_key]
+
+    # Lazy import — only runs when actually loading a model
+    from transformers import (
+        AutoModelForSequenceClassification,
+        AutoTokenizer,
+        pipeline as hf_pipeline,
+    )
+
     model = AutoModelForSequenceClassification.from_pretrained(repo_id, revision=revision)
     tokenizer = AutoTokenizer.from_pretrained(repo_id, revision=revision)
     pipe = hf_pipeline("text-classification", model=model, tokenizer=tokenizer)
     _pipeline_cache[cache_key] = pipe
     return pipe
 
+
 def load_local_fallback():
-    """Load local persistent fallback if HF fails."""
+    """Load local DistilBERT model from models/stable/ if present."""
     fallback_path = "models/stable/"
-    if os.path.exists(fallback_path):
-        model = AutoModelForSequenceClassification.from_pretrained(fallback_path)
-        tokenizer = AutoTokenizer.from_pretrained(fallback_path)
-        return hf_pipeline("text-classification", model=model, tokenizer=tokenizer)
-    return None
+    if not os.path.exists(fallback_path):
+        return None
+
+    from transformers import (
+        AutoModelForSequenceClassification,
+        AutoTokenizer,
+        pipeline as hf_pipeline,
+    )
+    model = AutoModelForSequenceClassification.from_pretrained(fallback_path)
+    tokenizer = AutoTokenizer.from_pretrained(fallback_path)
+    return hf_pipeline("text-classification", model=model, tokenizer=tokenizer)
+
 
 def get_inference_pipeline(repo_id: str = None):
+    """
+    Return a callable inference pipeline.
+    Priority: HF Hub active -> HF Hub stable -> local fallback -> dummy.
+    """
     repo_id = repo_id or os.environ.get("HF_REPO_ID", "")
 
     if repo_id:
@@ -58,5 +81,4 @@ def get_inference_pipeline(repo_id: str = None):
     if fallback:
         return fallback
 
-    # Return a dummy pipeline so server doesn't crash if no model exists yet
     return lambda text: [{"label": "unknown", "score": 0.0}]

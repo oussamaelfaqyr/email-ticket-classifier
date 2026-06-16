@@ -71,17 +71,25 @@ def load_classifier():
         except Exception as e:
             st.warning(f"HF model unavailable ({e}). Using baseline sklearn model.")
 
-    # Fallback: original sklearn baseline
+    # Fallback: load sklearn baseline directly with pickle
     try:
-        from src.serving.model_loader import ModelLoader
-        from src.serving.predict import Predictor
-        loader = ModelLoader("models/baseline.pkl", "data/processed/vectorizer.pkl")
-        loader.load()
-        predictor = Predictor(loader)
-        label_list = loader.model.classes_.tolist() if loader.is_loaded() else []
+        import pickle
+        import numpy as np
+        with open("models/baseline.pkl", "rb") as f:
+            clf = pickle.load(f)
+        with open("data/processed/vectorizer.pkl", "rb") as fv:
+            vectorizer = pickle.load(fv)
+
+        label_list = list(clf.classes_) if hasattr(clf, "classes_") else [
+            "account_access", "billing", "bug_report", "refund_request", "shipping_delivery"
+        ]
 
         def sk_predict(text):
-            return predictor.predict(text)
+            vec = vectorizer.transform([text])
+            label = clf.predict(vec)[0]
+            proba = clf.predict_proba(vec)[0]
+            confidence = float(np.max(proba))
+            return label, confidence
 
         return sk_predict, label_list
     except Exception as e:
