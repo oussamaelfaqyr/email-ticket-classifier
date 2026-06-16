@@ -21,18 +21,9 @@ import {
   X
 } from 'lucide-react';
 
-// Detect default API endpoint based on host
-const getDefaultApiUrl = () => {
-  if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'http://localhost:8000';
-    }
-  }
-  return 'https://email-ticket-classifier-production.up.railway.app';
-};
+// API URL: Set VITE_API_URL in Vercel environment variables to your Railway backend URL
+const API_BASE = import.meta.env.VITE_API_URL || 'https://email-ticket-classifier-production.up.railway.app';
 
-const API_BASE = getDefaultApiUrl();
 
 export default function App() {
   // Navigation & Authentication
