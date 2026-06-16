@@ -1,0 +1,9 @@
+{
+  "id": "531d83a4-80ba-4d7e-ac17-8f9340f502a0",
+  "ticket_db_id": 12,
+  "text": "Application keeps crashing there is a problem on the website fix it please",
+  "label": "unknown",
+  "corrected_label": "bug_report",
+  "confidence": 0.0,
+  "timestamp": "2026-06-16T12:36:37.724648Z"
+}
